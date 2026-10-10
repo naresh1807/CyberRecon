@@ -110,11 +110,29 @@ def parse_scan(payload, *, allow_partial=False):
                             "service": attrs.get("name", "unknown"), "product": attrs.get("product", ""),
                             "version": attrs.get("version", ""), "extra_info": attrs.get("extrainfo", ""),
                             "tunnel": attrs.get("tunnel", ""), "os_hint": attrs.get("ostype", ""),
-                            "confidence": attrs.get("conf", ""), "detection_method": attrs.get("method", ""),
+                            "confidence": attrs.get("conf", ""), "service_confidence": attrs.get("conf", "Unknown"), "detection_method": attrs.get("method", ""),
                             "cpe": [item.text for item in service.findall("cpe")] if service is not None else [],
                             "script_findings": scripts})
+    deduplicated = {}
+    conflicts = False
+    for record in records:
+        key = record["ip"], record["protocol"], record["port"]
+        if key not in deduplicated:
+            deduplicated[key] = record
+        else:
+            existing = deduplicated[key]
+            assertions = existing.get("port_assertions", [{k: v for k, v in existing.items() if k != "port_assertions"}])
+            if record not in assertions:
+                assertions.append(record)
+                existing["port_assertions"] = assertions
+                existing["verification_status"] = "conflicting XML assertions; review required"
+                conflicts = True
+                for field in ("state", "service", "product", "version"):
+                    if len({str(a.get(field)) for a in assertions}) > 1:
+                        existing[field] = "unknown" if field in {"state", "service"} else "Unknown"
+    records = list(deduplicated.values())
     return {"records": records, "hosts": hosts, "nmap_version": root.get("version", ""), "completion": dict(finished.attrib) if finished is not None else {},
-            "partial": finished is None or finished.get("exit") != "success" or any(h["timed_out"] for h in hosts),
+            "partial": conflicts or finished is None or finished.get("exit") != "success" or any(h["timed_out"] for h in hosts),
             "scaninfo": [dict(item.attrib) for item in root.findall("scaninfo")],
             "reported_ports": len(records), "open_ports": sum(r["state"] == "open" for r in records),
             "coverage_note": "scaninfo describes requested coverage; partial runs do not prove every requested port was attempted. Summarized extraports do not identify individual port numbers.",

@@ -25,7 +25,7 @@ def export_reports(repository, scan, directory):
     sections = ["<!doctype html><html lang='en'><meta charset='utf-8'><title>CyberRecon report</title>",
                 "<style>body{font:16px system-ui;max-width:1000px;margin:40px auto;padding:20px}pre{white-space:pre-wrap;overflow-wrap:anywhere}h2{border-bottom:1px solid #aaa}</style>",
                 "<h1>CyberRecon report</h1><p>Observations require validation. Missing observations do not prove removal.</p>"]
-    for kind in ("project", "scan", *KINDS):
+    for kind in ("project", "scan", *KINDS, "results"):
         sections.append("<h2>" + html.escape(kind.title()) + "</h2><pre>" + html.escape(json.dumps(snapshot[kind], indent=2, ensure_ascii=False)) + "</pre>")
     sections.append("</html>")
     with atomic_output(directory / "report.html") as temporary:
@@ -35,7 +35,7 @@ def export_reports(repository, scan, directory):
     styles = getSampleStyleSheet()
     content = [Paragraph("CyberRecon report", styles["Title"]),
                Paragraph("Observations require validation; missing observations do not prove removal.", styles["BodyText"])]
-    for kind in ("project", "scan", *KINDS):
+    for kind in ("project", "scan", *KINDS, "results"):
         content.extend([Spacer(1, 12), Paragraph(kind.title(), styles["Heading2"])])
         items = snapshot[kind] if isinstance(snapshot[kind], list) else [snapshot[kind]]
         for item in items:

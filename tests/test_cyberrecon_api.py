@@ -10,7 +10,8 @@ def test_openapi_keeps_names_not_examples():
     body = json.dumps({"openapi": "3.1.0", "servers": [{"url": "https://other.org/"}, {"url": "/v1"}],
                        "paths": {"/users": {"post": {"parameters": [{"name": "token", "example": "SECRET"}], "security": [{"Bearer": []}]}}}})
     result = extract(response, body, Scope(("example.org",)))
-    endpoint = next(row for row in result if row.get("methods"))
+    endpoint = next(row for row in result if row.get("classification") == "documented endpoint (unverified)")
+    assert any(row.get("methods") == ["GET"] and row["url"] == response["url"] for row in result)
     assert endpoint["url"] == "https://example.org/v1/users"
     assert endpoint["methods"] == ["POST"]
     assert endpoint["parameter_names"] == ["token"]

@@ -196,7 +196,7 @@ def test_detail_views_use_dns_mapping_and_keep_original_evidence(window):
     window.display_snapshot(snapshot)
     row = window.result_views['domains'].rows[0]
     assert row['ip_address'] == '192.0.2.4, 2001:db8::4'
-    assert row['status'] == 'Resolved' and row['_record'] == original
+    assert row['status'] == 'Resolved' and row['_record']['discovery'] == original
     assert window.result_views['ips'].columns == ['address', 'hostnames', 'location', 'asn']
 
 

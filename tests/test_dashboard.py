@@ -72,7 +72,7 @@ def test_simple_gui_and_authorization_cancel(tmp_path, monkeypatch):
     try:
         window.show()
         app.processEvents()
-        assert window.navigation.count() == len(SECTIONS) == 17
+        assert window.navigation.count() == len(SECTIONS) == 18
         assert [field for field in window.findChildren(QLineEdit) if field.isVisible()] == [window.target]
         monkeypatch.setattr(QInputDialog, 'getText', lambda *args: ('', False))
         window.target.setText('qualitythought.in')

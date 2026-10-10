@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QSize, QRectF
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPainterPath, QPalette
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QDialog, QTextEdit, QScrollArea, QHeaderView, QSizePolicy)
+    QDialog, QTextEdit, QScrollArea, QHeaderView, QSizePolicy, QComboBox)
 
 ACCENTS = {'success': '#27d697', 'danger': '#ff596d', 'warning': '#edb850', 'blue': '#399bff', 'cyan': '#29c9ee'}
 
@@ -77,10 +77,12 @@ class ElidedLabel(QLabel):
 
 class ObservationTable(QWidget):
     """Bounded pages, global filtering/sorting, original-record detail dialogs."""
-    def __init__(self, page_size=1000, compact=False):
+    def __init__(self, page_size=50, compact=False):
         super().__init__()
         self.page_size, self.page, self.records, self.rows = page_size, 0, [], []
         self.columns = None
+        self.filters = {}
+        self._search_text = {}
         self.compact = compact
         self._rendering = False
         self.layout = QVBoxLayout(self)
@@ -122,6 +124,7 @@ class ObservationTable(QWidget):
     def set_records(self, records, columns=None):
         self.columns = columns
         self.records = list(records)
+        self._search_text = {id(r): json.dumps(r, ensure_ascii=False).casefold() for r in self.records}
         self.page = 0
         header = self.table.horizontalHeader()
         if header.sortIndicatorSection() >= 0:
@@ -137,8 +140,9 @@ class ObservationTable(QWidget):
 
     def filtered_records(self):
         query = self.filter.text().casefold()
-        return [r for r in self.records if not query or query in json.dumps(
-            {k: v for k, v in r.items() if not k.startswith('_')}, ensure_ascii=False).casefold()]
+        return [r for r in self.records if (not query or query in self._search_text.get(id(r), ""))
+                and all(not value or (value in r.get("confidence_levels", [str(r.get("confidence", "Unknown"))]) if key == "confidence" else value in r.get(key, []) if isinstance(r.get(key), list) else str(r.get(key, "")) == value)
+                        for key, value in self.filters.items())]
 
     def apply_filter(self):
         self.page = 0
@@ -228,6 +232,67 @@ class ObservationTable(QWidget):
         view = QTextEdit(); view.setReadOnly(True)
         view.setPlainText(json.dumps(item.data(Qt.UserRole), indent=2, ensure_ascii=False))
         layout.addWidget(view)
+        dialog.exec()
+
+
+class ResultsTable(ObservationTable):
+    """Global persisted observations with conjunctive metadata filters."""
+    FILTERS = ("severity", "confidence", "sources", "verification_status", "scan_id")
+    COLUMNS = ["kind", "hostname", "ip_address", "port", "protocol", "title", "severity", "confidence", "verification_status", "sources"]
+
+    def __init__(self, repository):
+        self.repository = repository
+        self.selectors = {}
+        super().__init__(page_size=50)
+        row = QHBoxLayout()
+        for key in self.FILTERS:
+            combo = QComboBox(); combo.setToolTip("Filter " + key.replace("_", " "))
+            combo.addItem("All " + key.replace("_", " "), "")
+            combo.currentIndexChanged.connect(lambda _, k=key: self.update_selector(k))
+            self.selectors[key] = combo; row.addWidget(combo)
+        self.layout.insertLayout(1, row)
+        self.filter.setPlaceholderText("Search all hosts, IPs, ports, URLs, APIs, technologies and evidence…")
+        self.columns = self.COLUMNS
+
+    def update_selector(self, key):
+        self.filters[key] = self.selectors[key].currentData() or ""
+        self.apply_filter()
+
+    def set_records(self, records, columns=None):
+        super().set_records(records, columns or self.COLUMNS)
+        for key, combo in self.selectors.items():
+            selected = combo.currentData()
+            values = set()
+            for record in self.records:
+                value = record.get("confidence_levels", [record.get("confidence", "Unknown")]) if key == "confidence" else record.get(key, "Unknown")
+                values.update(str(v) for v in value) if isinstance(value, list) else values.add(str(value))
+            combo.blockSignals(True); combo.clear(); combo.addItem("All " + key.replace("_", " "), "")
+            for value in sorted(values): combo.addItem(value, value)
+            combo.setCurrentIndex(max(0, combo.findData(selected)))
+            combo.blockSignals(False)
+            self.filters[key] = combo.currentData() or ""
+        self.apply_filter()
+
+    def details(self, row, column):
+        item = self.table.item(row, column)
+        if item is None: return
+        record = item.data(Qt.UserRole)
+        dialog = QDialog(self); dialog.setWindowTitle("Result details and original evidence")
+        dialog.resize(800, 520); layout = QVBoxLayout(dialog)
+        view = QTextEdit(); view.setReadOnly(True)
+        view.setPlainText(json.dumps(record, indent=2, ensure_ascii=False)); layout.addWidget(view)
+        descriptor = record.get("evidence")
+        if isinstance(descriptor, dict) and descriptor.get("path"):
+            button = QPushButton("View original tool output (checksum verified)")
+            def read():
+                try:
+                    payload = self.repository.read_evidence(record["scan_id"], descriptor)
+                    # A bounded preview is explicitly labelled; file remains intact.
+                    view.setPlainText(payload[:65536].decode(errors="replace") +
+                        ("\n[Preview limited to 65536 bytes; original evidence preserved.]" if len(payload) > 65536 else ""))
+                except (OSError, ValueError) as exc:
+                    view.setPlainText("Evidence unavailable or invalid: " + type(exc).__name__)
+            button.clicked.connect(read); layout.addWidget(button)
         dialog.exec()
 
 

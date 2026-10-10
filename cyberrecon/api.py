@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlsplit
 from .network import clean_url
 
 
-def extract(response, body, scope):
+def extract(response, body, scope, registry=None):
     url = response["url"]
     path = urlsplit(url).path
     records = []
@@ -25,23 +25,24 @@ def extract(response, body, scope):
                 tail = body[match.end():match.end() + 300].split(");", 1)[0]
                 explicit = re.search(r'^\s*,\s*\{[^}]{0,250}?\bmethod\s*:\s*["\'](GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)["\']', tail, re.I)
                 method = explicit.group(1).upper() if explicit else "Unknown"
-            records.append({"url": endpoint, "method": method, "methods": [] if method == "Unknown" else [method], "parameter_names": [],
+            variant = registry.remember(match.group(2), url, "JavaScript API reference") if registry is not None else None
+            records.append({"url": endpoint, "query_variant_id": variant, "method": method, "methods": [] if method == "Unknown" else [method], "parameter_names": sorted({key for key, _ in parse_qsl(urlsplit(match.group(2)).query, keep_blank_values=True)}),
                             "classification": "JavaScript candidate", "verification_status": "unverified", "authentication": "Unknown",
                             "source_url": url, "confidence": "candidate", "note": "Static reference only; operation was not sent."})
     if re.search(r"/(api|graphql|swagger|openapi)(/|\.|$)", path, re.I) or response["status_code"] in {401, 403}:
         challenge = response["headers"].get("www-authenticate", "").split(" ", 1)[0]
-        records.append({"url": url, "classification": "observed HTTP surface", "status_code": response["status_code"], "method": "GET", "content_type": content_type, "verification_status": "HTTP observed", "authentication": "challenge observed" if response["status_code"] == 401 and response["headers"].get("www-authenticate") else "Unknown",
+        records.append({"url": url, "classification": "observed HTTP surface", "status_code": response["status_code"], "method": "GET", "methods": ["GET"], "content_type": content_type, "verification_status": "HTTP observed", "authentication": "challenge observed" if response["status_code"] == 401 and response["headers"].get("www-authenticate") else "Unknown",
                         "parameter_names": sorted({key for key, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)}),
                         "challenge_scheme": challenge if challenge.lower() in {"basic", "bearer", "digest", "negotiate"} else "unknown",
                         "note": "Authentication behavior and business impact have not been tested."})
     if "json" not in response["headers"].get("content-type", "").lower() or response["truncated"]:
-        return inventory(records)
+        return inventory(records, response)
     try:
         data = json.loads(body)
     except ValueError:
-        return inventory(records)
+        return inventory(records, response)
     if not isinstance(data, dict) or not isinstance(data.get("paths"), dict) or not (data.get("openapi") or data.get("swagger")):
-        return inventory(records)
+        return inventory(records, response)
     base = url
     servers = data.get("servers", [])
     selected_server = False
@@ -56,7 +57,7 @@ def extract(response, body, scope):
             continue
     if isinstance(servers, list) and servers and not selected_server:
         records.append({"url": url, "classification": "API document", "parameter_names": [], "verification_status": "document observed, operations skipped", "coverage_warning": "No authorized OpenAPI server in the bounded server list; operations not inventoried."})
-        return inventory(records)
+        return inventory(records, response)
     if data.get("swagger") and isinstance(data.get("basePath", "/"), str):
         try:
             parts = urlsplit(url)
@@ -68,7 +69,7 @@ def extract(response, body, scope):
                 base = candidate
             else:
                 records.append({"url": url, "classification": "API document", "parameter_names": [], "coverage_warning": "Swagger destination is outside authorized scope; operations skipped."})
-                return inventory(records)
+                return inventory(records, response)
         except ValueError:
             pass
     for path, operations in list(data["paths"].items())[:500]:
@@ -104,18 +105,21 @@ def extract(response, body, scope):
     if len(data["paths"]) > 500:
         for row in records:
             row["coverage_warning"] = "OpenAPI path budget reached (500); operations inventory is incomplete."
-    return inventory(records)
+    return inventory(records, response)
 
 
-def inventory(records):
+def inventory(records, response=None):
     """Normalize and deduplicate without replacing method-specific evidence."""
     from .models import utcnow
     found = {}
     for row in records:
+        if response is not None:
+            row["evidence"] = {"source_url": response["url"], "response_sha256": response.get("body_sha256", "Unknown"), "status_code": response["status_code"]}
+        row["verified"] = row["classification"] == "observed HTTP surface"
         parts = urlsplit(row["url"])
         row.update(host=parts.hostname, path=parts.path, base_url=parts.scheme + "://" + parts.netloc,
                    discovered_at=utcnow())
         row.setdefault("content_type", "Unknown")
         row.setdefault("confidence", "observed")
-        found[(row["url"], tuple(row.get("methods", [])), row["classification"])] = row
+        found[(row["url"], tuple(row.get("methods", [])), row["classification"], row.get("query_variant_id"))] = row
     return list(found.values())

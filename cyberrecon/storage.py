@@ -133,15 +133,39 @@ class Repository:
             row = db.execute("SELECT value FROM observations WHERE scan_id=? AND kind=? AND key=?", (scan, kind, key)).fetchone()
             previous = json.loads(row[0]) if row else {}
             value = {**previous, **attributes}
+            # Preserve distinct collector assertions rather than silently replacing them.
+            metadata = {"source_observations", "key", "source", "sources", "collected_at", "first_seen", "last_seen", "asset_id", "confidence", "observation_status"}
+            variants = list(previous.get("source_observations", []))
+            candidates = []
+            if previous and not variants:
+                candidates.append((previous, previous.get("source", source), previous.get("confidence", "Unknown")))
+            candidates.append((attributes, source, confidence))
+            for candidate, origin, level in candidates:
+                assertion = {k: v for k, v in candidate.items() if k not in metadata}
+                # Collector timestamps do not create a new assertion by themselves.
+                stable = {k: v for k, v in assertion.items() if k not in {"detected_at", "resolved_at", "discovered_at", "retrieved_at"}}
+                digest = hashlib.sha256(json.dumps([origin, level, stable], sort_keys=True, allow_nan=False).encode()).hexdigest()
+                match = next((v for v in variants if v["assertion_id"] == digest), None)
+                if match:
+                    match["last_seen"] = now
+                else:
+                    variants.append({"assertion_id": digest, "source": origin, "confidence": level,
+                                     "first_seen": now, "last_seen": now, "historical": historical, "attributes": assertion})
+            value["source_observations"] = variants
+            if isinstance(previous.get("evidence"), list) and isinstance(attributes.get("evidence"), list):
+                merged = {json.dumps(v, sort_keys=True): v for v in previous["evidence"] + attributes["evidence"]}
+                value["evidence"] = list(merged.values())
+            if previous.get("verified") is True and attributes.get("verified") is False:
+                value["verification_status"] = previous.get("verification_status", "HTTP observed")
             for flag in ("verified", "active_verified", "verified_current"):
-                if previous.get(flag) is True and not historical:
+                if previous.get(flag) is True:
                     value[flag] = True
             value.update(key=key, source=source, collected_at=now, last_seen=now,
                          first_seen=previous.get("first_seen", previous.get("collected_at", now)),
                          sources=sorted(set(previous.get("sources", [previous["source"]] if previous else [])) | {source}),
                          asset_id=hashlib.sha256((kind + "\0" + key).encode()).hexdigest(),
                          confidence=confidence,
-                         observation_status="HISTORICAL" if historical else "CURRENT")
+                         observation_status="HISTORICAL" if historical and previous.get("observation_status") != "CURRENT" else "CURRENT")
             db.execute("INSERT INTO observations VALUES(?,?,?,?) ON CONFLICT(scan_id,kind,key) DO UPDATE SET value=excluded.value",
                        (scan, kind, key, json.dumps(value, allow_nan=False)))
         return value
@@ -187,7 +211,10 @@ class Repository:
             data[row["kind"]].append(json.loads(row["value"]))
         project = self.project(meta["project_id"])
         project["scope_history"] = self.scope_history(meta["project_id"])
-        return {"scan": meta, "project": project, **data}
+        snapshot = {"scan": meta, "project": project, **data}
+        from .results import unified_results
+        snapshot["results"] = unified_results(snapshot)
+        return snapshot
 
     def finish(self, scan, warnings, failed=False, cancelled=False, *, export=True):
         self.snapshot(scan)
@@ -217,7 +244,7 @@ class Repository:
         if directory == self.path or (directory != self.home and directory.is_file()):
             raise ValidationError("Choose an export directory.")
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for kind in (*KINDS, "scan", "project"):
+        for kind in (*KINDS, "scan", "project", "results"):
             destination = directory / (kind + ".json")
             if destination.is_symlink():
                 raise ValidationError("Export destinations cannot be symlinks.")
@@ -235,26 +262,60 @@ class Repository:
             temporary.write_bytes(payload)
         return {"path": str(path.relative_to(self.home)), "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
 
+    def read_evidence(self, scan, descriptor):
+        """Read bounded managed evidence after validating path and checksum."""
+        if not isinstance(descriptor, dict) or not isinstance(descriptor.get("path"), str):
+            raise ValidationError("Invalid evidence descriptor.")
+        path = Path(descriptor["path"])
+        if path.is_absolute() or len(path.parts) != 4 or path.parts[:3] != ("scans", scan, "evidence"):
+            raise ValidationError("Evidence must belong to the selected scan.")
+        current = self.home
+        for part in path.parts:
+            if part in {".", ".."}:
+                raise ValidationError("Invalid evidence path.")
+            current = current / part
+            if current.is_symlink():
+                raise ValidationError("Evidence paths cannot be symlinks.")
+        fd = os.open(current, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as stream:
+            payload = stream.read(16 * 1024 * 1024 + 1)
+        if len(payload) > 16 * 1024 * 1024 or len(payload) != descriptor.get("bytes") or hashlib.sha256(payload).hexdigest() != descriptor.get("sha256"):
+            raise ValidationError("Evidence size or checksum mismatch.")
+        return payload
 
-def compare_snapshots(before, after):
+
+def compare_snapshots(before, after, *, include_persistent=False):
     if before["scan"]["project_id"] != after["scan"]["project_id"]:
         raise ValidationError("Compare scans from the same project.")
     result = []
     for kind in KINDS:
-        left = {row["key"]: row for row in before[kind] if row.get("purpose") != "content discovery negative control"}
-        right = {row["key"]: row for row in after[kind] if row.get("purpose") != "content discovery negative control"}
+        left = {row["key"]: row for row in before[kind] if row.get("purpose") != "content discovery negative control" and not row.get("query_variant_id")}
+        right = {row["key"]: row for row in after[kind] if row.get("purpose") != "content discovery negative control" and not row.get("query_variant_id")}
+        variants = {}
+        for side, snapshot in (("before", before), ("after", after)):
+            for row in snapshot[kind]:
+                if row.get("query_variant_id"):
+                    key = row.get("url", "Unknown") + ":" + ",".join(row.get("methods", []))
+                    variants.setdefault(key, {"before": [], "after": []})[side].append(row)
+        for key, rows in sorted(variants.items()):
+            result.append({"kind": kind, "key": key, "status": "INCOMPARABLE" if rows["before"] and rows["after"] else "NEW" if not rows["before"] else "NOT_OBSERVED",
+                           **rows, "before_scan_status": before["scan"]["status"], "after_scan_status": after["scan"]["status"],
+                           "note": "Query variants are distinct within a scan but their opaque identifiers cannot be compared across scans. Absence does not prove removal."})
         for key in sorted(left.keys() | right.keys()):
-            status = "NEW" if key not in left else "REMOVED" if key not in right else "CHANGED"
+            status = "NEW" if key not in left else "NOT_OBSERVED" if key not in right else "CHANGED"
             def stable(row):
                 if isinstance(row, list):
                     return [stable(value) for value in row]
                 if not isinstance(row, dict):
                     return row
-                return {k: stable(v) for k, v in row.items() if k not in {"collected_at", "first_seen", "last_seen", "retrieved_at", "intelligence_generated_at", "evidence"}
+                return {k: stable(v) for k, v in row.items() if k not in {"collected_at", "first_seen", "last_seen", "retrieved_at", "intelligence_generated_at", "evidence", "source_observations", "detected_at", "resolved_at", "discovered_at", "query_variants", "query_variant_id"}
                         and not (k == "url" and row.get("body_sha256") and "cyberrecon-missing-" in str(v))}
             if key in left and key in right and stable(left[key]) == stable(right[key]):
-                continue
+                if not include_persistent:
+                    continue
+                status = "PERSISTENT"
             result.append({"kind": kind, "key": key, "status": status,
                            "before": left.get(key), "after": right.get(key),
+                           "before_scan_status": before["scan"]["status"], "after_scan_status": after["scan"]["status"],
                            "note": "Not observed in this scan does not prove removal; compare coverage/settings and warnings."})
     return result

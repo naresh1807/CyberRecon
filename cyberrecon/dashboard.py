@@ -13,7 +13,7 @@ SECTIONS = (
     ('dns', 'DNS'), ('tls', 'SSL/TLS'), ('web', 'HTTP Headers'),
     ('urls', 'Discovered URLs'), ('apis', 'API Inventory'), ('frontend', 'Frontend'), ('backend', 'Backend'),
     ('screenshots', 'Screenshots'), ('evidence', 'Progress & Coverage'),
-    ('history', 'Scan History'), ('export', 'Reports'))
+    ('history', 'Scan History'), ('results', 'All Results'), ('export', 'Reports'))
 
 VIEW_ALIASES = dict(assets='domains', subdomains='domains', dns='dns', http='web', ports='nmap',
                     services='nmap', technologies='technologies', urls='urls', apis='apis',
@@ -149,12 +149,21 @@ def overview_data(snapshot):
                 ipaddress.ip_address(host)
             except ValueError:
                 domain_records.setdefault(host, record)
+    dns_by_host = {}
+    for row in snapshot.get('dns', []): dns_by_host.setdefault(row.get('host'), []).append(row)
+    resolutions = {r.get('host'): r for r in snapshot.get('dns', []) if r.get('type') == 'RESOLUTION'}
     domains = []
     for host, record in sorted(domain_records.items()):
         status = ('Active observed' if assets.get(host, {}).get('active_verified') else
-                  'Resolved' if host_addresses.get(host) else 'Unverified')
+                  'Resolved' if host_addresses.get(host) else
+                  'Resolution incomplete' if resolutions.get(host, {}).get('resolution_status') == 'partial' else
+                  'Unresolved' if resolutions.get(host, {}).get('resolution_status') == 'unresolved' else 'Unverified')
         domains.append({'subdomain': host, 'ip_address': ', '.join(sorted(host_addresses.get(host, []))) or 'Not resolved',
-                        'status': status, '_record': record})
+                        'status': status, 'resolution_status': resolutions.get(host, {}).get('resolution_status', 'not checked'),
+                        'resolved_at': resolutions.get(host, {}).get('resolved_at', 'Unknown'),
+                        'wildcard_status': resolutions.get(host, {}).get('wildcard_status', 'not checked'),
+                        '_record': {'discovery': record, 'resolution': resolutions.get(host),
+                                    'dns_records': dns_by_host.get(host, [])}})
     ips = [{'address': address, 'hostnames': ', '.join(sorted(v['hosts'] - {''})) or 'Not collected',
             'location': v['record'].get('location') or 'Not collected',
             'asn': v['record'].get('asn') or 'Not collected', '_record': v['record']}

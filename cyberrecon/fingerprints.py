@@ -51,18 +51,25 @@ def detect(response, body, cookies=()):
               "cookie_names": " ".join(c.split("=", 1)[0].strip() for c in cookies if "=" in c)}
     detections = {}
     for index, (name, category, source, pattern) in enumerate(RULES):
-        match = re.search(pattern, values.get(source, "")[:512 * 1024], re.I)
-        if not match:
+        matches = list(re.finditer(pattern, values.get(source, "")[:512 * 1024], re.I))[:100]
+        if not matches:
             continue
-        version = next((v for v in match.groups() if v), "Unknown")
+        versions = sorted({v for match in matches for v in match.groups() if v})
+        version = versions[0] if len(versions) == 1 else "Unknown"
         evidence = {"rule": index, "source": source, "url": response["url"], "body_sha256": response.get("body_sha256"),
-                    "note": "Observable indicator; headers, cookie names and public assets may be spoofed."}
+                    "observed_versions": versions, "note": "Observable indicator; headers, cookie names and public assets may be spoofed."}
         row = detections.setdefault(name, {"technology": name, "product": name, "category": category, "version": version,
                     "classification": "Likely", "confidence": "indicator", "verified_version": False,
                     "url": response["url"], "detected_at": utcnow(), "ruleset": RULESET_VERSION, "evidence": []})
-        if version != "Unknown":
-            row["version"] = version
         row["evidence"].append(evidence)
+        observed_versions = sorted({v for e in row["evidence"] for v in e.get("observed_versions", [])})
+        row["observed_versions"] = observed_versions
+        row["version"] = observed_versions[0] if len(observed_versions) == 1 else "Unknown"
+        row["version_status"] = "conflicting public indicators" if len(observed_versions) > 1 else "public indicator, installed version unverified" if observed_versions else "Unknown"
+        signal_sources = sorted({e["source"] for e in row["evidence"]})
+        row["signal_sources"] = signal_sources
+        row["confidence"] = "multiple indicators" if len(signal_sources) > 1 else "indicator"
+        row["verification_status"] = "public indicators observed; product not independently verified"
     asset = ("HTML", "Confirmed") if "html" in content_type and re.search(r"<(?:html|title|body|script|a)(?:\s|>)", body, re.I) else ("CSS", "Likely") if "text/css" in content_type else ("JavaScript", "Likely") if "javascript" in content_type else None
     if asset:
         name, classification = asset

@@ -58,13 +58,45 @@ def candidates(response, body):
     return list(dict.fromkeys(found))[:500]
 
 
-def normalize_candidates(response, body, scope):
+def normalize_candidates(response, body, scope, registry=None):
     result = []
     for value, source in candidates(response, body):
         try:
             url = clean_url(value, response["url"])
             if scope.allows(url):
+                if registry is not None: registry.remember(value, response["url"], source)
                 result.append((url, source))
         except ValueError:
             continue
     return list(dict.fromkeys(result))
+
+
+class RouteRegistry:
+    """Ephemeral keyed identifiers distinguish query candidates without retaining values.
+
+    Identifiers compare candidates only within this scan, not across scans.
+    A fetched redacted URL never verifies the original query-value variant.
+    """
+    def __init__(self):
+        import secrets
+        self._salt = secrets.token_bytes(32)
+        self.routes = {}
+
+    def remember(self, value, base, source):
+        import hashlib
+        import hmac
+        from urllib.parse import urljoin, parse_qsl
+        url = clean_url(value, base)
+        raw = urlsplit(urljoin(base, value))
+        if not raw.query: return None
+        # Order-independent pairs retain duplicate parameter multiplicity.
+        identity = json.dumps([url, sorted(parse_qsl(raw.query, keep_blank_values=True))], ensure_ascii=False)
+        identifier = hmac.new(self._salt, identity.encode(), hashlib.sha256).hexdigest()
+        variants = self.routes.setdefault(url, {})
+        row = variants.setdefault(identifier, {"query_variant_id": identifier, "parameter_names": sorted({k for k, _ in parse_qsl(raw.query, keep_blank_values=True)}),
+                   "sources": [], "verification_status": "unverified query variant; original values not sent", "values_retained": False})
+        row["sources"] = sorted(set(row["sources"]) | {source})
+        return identifier
+
+    def variants(self, url):
+        return list(self.routes.get(url, {}).values())

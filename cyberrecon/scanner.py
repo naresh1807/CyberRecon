@@ -101,6 +101,8 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
     identifier = repository.start_scan(project, target, settings)
     warnings = []
     verified_urls = set()
+    from .discovery import RouteRegistry
+    route_registry = RouteRegistry()
     progress = progress or (lambda message: None)
     progress("Scan job: " + identifier)
     stages = Stages(repository, identifier, progress)
@@ -262,11 +264,11 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                     cookies = result.pop("cookie_headers")
                     save("http", result["url"], result, "scoped HTTP")
                     from .api import extract
-                    extracted_apis = extract(result, body, scope())
+                    extracted_apis = extract(result, body, scope(), registry=route_registry)
                     for api in extracted_apis:
                         if api.get("coverage_warning"):
                             warn(api["coverage_warning"])
-                        save("apis", api["url"] + ":" + ",".join(api.get("methods", [])), api, "HTTP/API document extraction")
+                        save("apis", api["url"] + ":" + ",".join(api.get("methods", [])) + (":" + api["query_variant_id"] if api.get("query_variant_id") else ""), api, "HTTP/API document extraction")
                         edge("url:" + result["url"], "api:" + api["url"], "describes")
                         for name in api.get("parameter_names", []):
                             edge("api:" + api["url"], "parameter:" + api["url"] + ":" + name, "documents_parameter")
@@ -278,7 +280,7 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                                          "possible_wildcard_response": bool(baseline and baseline["status_code"] == result["status_code"] and
                                                                            baseline["body_sha256"] == result["body_sha256"]),
                                          "note": "Compare the negative control and application behavior; response success is not proof of exposure."}
-                    save("urls", result["url"], {"url": result["url"], "status_code": result["status_code"], "content_type": result["headers"].get("content-type", "Unknown"), "redirect_chain": result["redirect_chain"], "discovered_by": discovery_source, "verified": True, "verification_status": "HTTP observed", **content_notes}, discovery_source)
+                    save("urls", result["url"], {"url": result["url"], "status_code": result["status_code"], "content_type": result["headers"].get("content-type", "Unknown"), "redirect_chain": result["redirect_chain"], "discovered_by": discovery_source, "crawl_depth": depth, "verified": True, "verification_status": "HTTP observed", **content_notes}, discovery_source)
                     actual_host = host_of(result["url"])
                     if actual_host != host:
                         save("assets", actual_host, {"host": actual_host, "active_verified": True}, "scoped HTTP")
@@ -300,7 +302,11 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                                 if finding["status"] == "review":
                                     save("findings", result["url"] + ":" + finding["check"],
                                          {**finding, "url": result["url"], "classification": "configuration-review",
-                                          "confirmed_vulnerability": False, "evidence_sha256": result["body_sha256"]},
+                                          "confirmed_vulnerability": False, "evidence_sha256": result["body_sha256"],
+                                          "title": finding["check"], "description": "Observed HTTP configuration requires application-specific review.",
+                                          "verification_status": "potential configuration issue", "impact": "Context-dependent; exploitability not tested.",
+                                          "false_positive_considerations": "Application purpose, response type and browser behavior may make this policy intentional.",
+                                          "reproduction": {"method": "GET", "url": result["url"], "status_code": result["status_code"]}},
                                          "HTTP configuration review", confidence="requires-validation")
                         parser = Links()
                         parser.feed(body)
@@ -327,6 +333,11 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                         if potential:
                             save("findings", result["url"] + ":sensitive-assignment-candidates", {"url": result["url"],
                                  "classification": "review", "confirmed_vulnerability": False,
+                                 "title": "Potential sensitive JavaScript assignments", "severity": "review",
+                                 "description": "Public JavaScript contains assignment patterns resembling sensitive identifiers; values are omitted.",
+                                 "verification_status": "potential issue", "impact": "Unknown; credentials and exploitability were not verified.",
+                                 "recommendation": "Review the public asset locally and remove unintended sensitive data; rotate only confirmed exposed credentials.",
+                                 "false_positive_considerations": "Public identifiers, placeholders and development examples can match.",
                                  "count": len(potential), "character_offsets": potential, "evidence_sha256": result["body_sha256"],
                                  "note": "Pattern matches may be public keys or placeholders. Values are omitted; verify ownership and intended exposure."},
                                  "JavaScript static patterns", confidence="requires-validation")
@@ -340,14 +351,22 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                                 save("javascript", result["url"], {"url": result["url"], "source_map": True, "source_count": len(source_map["sources"]), "source_content_retained": False, "sha256": result["body_sha256"]}, "public source map metadata")
                         except (ValueError, RecursionError):
                             pass
-                    candidates = list(dict.fromkeys(candidates + normalize_candidates(result, body, scope())))
+                    for value, tag in candidates:
+                        try:
+                            if scope().allows(clean_url(value, result["url"])):
+                                route_registry.remember(value, result["url"], tag)
+                        except ValueError:
+                            continue
+                    candidates = list(dict.fromkeys(candidates + normalize_candidates(result, body, scope(), registry=route_registry)))
                     for value, tag in candidates[:500]:
                         try:
                             link = clean_url(value, result["url"])
                             if not scope().allows(link):
                                 continue
-                            if link not in verified_urls:
-                                save("urls", link, {"url": link, "discovered_by": tag, "verified": False, "verification_status": "unverified candidate", "crawl_status": "excluded navigation or form" if not safe_navigation(link) or tag.startswith("form") else "candidate"}, tag)
+                            if link in verified_urls:
+                                save("urls", link, {"url": link}, tag)
+                            else:
+                                save("urls", link, {"url": link, "discovered_by": tag, "discovery_url": result["url"], "crawl_depth": depth + 1, "verified": False, "verification_status": "unverified candidate", "crawl_status": "excluded navigation or form" if not safe_navigation(link) or tag.startswith("form") else "candidate"}, tag)
                             edge("url:" + result["url"], "url:" + link, "links_to")
                             if link not in verified_urls and not any(a["url"] == link for a in extracted_apis) and re.search(r"/(api|graphql|swagger|openapi)(/|\.|$)", urlsplit(link).path, re.I):
                                 save("apis", link + ":", {"url": link, "host": host_of(link), "path": urlsplit(link).path, "method": "Unknown", "authentication": "Unknown", "verification_status": "unverified candidate", "classification": "candidate", "note": "Endpoint requires validation."}, "page extraction")
@@ -359,6 +378,9 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                     warn(f"HTTP {url}", exc)
             if queue:
                 warn(f"Crawl page limit reached for {host}.")
+        for url in route_registry.routes:
+            save("urls", url, {"url": url, "query_variants": route_registry.variants(url),
+                 "query_identity_note": "Opaque identifiers apply only within this scan. HTTP observations of the redacted URL do not verify candidate query-value variants."}, "redacted route inventory")
         for name in ("http", "technologies", "urls", "apis"):
             stages.finish(name, "partial" if len(warnings) > web_warning_start or len(hosts) > max_hosts or cancel.is_set() else "complete", requests=http.count, budget=http.maximum, reason="Results from responses actually collected; configured crawl limits apply.")
         if history and not cancel.is_set():

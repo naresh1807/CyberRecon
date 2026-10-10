@@ -325,7 +325,7 @@ def test_dashboard_streams_real_job_without_claiming_completion(tmp_path):
         assert 'provisional' in window.overview.notice.text()
         assert all(not b.isEnabled() for b in window.overview.export_buttons)
         assert window.result_views['backend'].table.rowCount() == 1
-        assert len(SECTIONS) == 17
+        assert len(SECTIONS) == 18 and ('results', 'All Results') in SECTIONS
     finally:
         window.worker = None; window.close()
 

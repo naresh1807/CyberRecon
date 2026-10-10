@@ -2,7 +2,7 @@
 import json
 import threading
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, QUrl, Qt, QSize
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, QUrl, Qt, QSize, QTimer
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -13,7 +13,7 @@ from .cli import doctor
 from .scanner import scan
 from .storage import KINDS, compare_snapshots
 from .scope import host_of
-from .gui_components import ObservationTable, OverviewDashboard, SummaryCard, icon, label, ACCENTS
+from .gui_components import ResultsTable, ObservationTable, OverviewDashboard, SummaryCard, icon, label, ACCENTS
 
 
 DASHBOARD_STYLE = """
@@ -119,6 +119,7 @@ class Window(QMainWindow):
         self.setMinimumSize(560, 520)
         self.setStyleSheet(DASHBOARD_STYLE)
         self.local_jobs = []
+        self._closing = False
         self.advanced = QDialog(self)
         self.advanced.setWindowTitle("Authorization and advanced settings")
         self.advanced.resize(820, 720)
@@ -220,8 +221,8 @@ class Window(QMainWindow):
             self.cards[key] = SummaryCard(title, glyph, accent)
         workspace_layout.addLayout(self.cards_layout)
         self.dashboard_tabs = QTabBar(); self.dashboard_tabs.setExpanding(False); self.dashboard_tabs.setUsesScrollButtons(True)
-        self.tab_keys = ['overview', 'domains', 'ips', 'nmap', 'technologies', 'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'evidence', 'history', 'urls', 'apis', 'frontend', 'backend']
-        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Vulnerabilities', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend'):
+        self.tab_keys = ['overview', 'domains', 'ips', 'nmap', 'technologies', 'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'evidence', 'history', 'urls', 'apis', 'frontend', 'backend', 'results']
+        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Vulnerabilities', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend', 'All Results'):
             self.dashboard_tabs.addTab(text)
         workspace_layout.addWidget(self.dashboard_tabs); workspace_layout.addWidget(self.pages, 1)
         body.addWidget(workspace, 1); layout.addLayout(body, 1)
@@ -248,6 +249,8 @@ class Window(QMainWindow):
                 self.report_preview = QTextEdit(); self.report_preview.setReadOnly(True)
                 self.report_preview.setPlaceholderText('Select a persisted scan to view its full report, scope and original observations.')
                 exports.addWidget(self.report_preview, 1)
+            elif key == "results":
+                view = ResultsTable(self.repo); self.result_views[key] = view
             elif key == "screenshots":
                 view = QWidget(); empty = QVBoxLayout(view)
                 notice = label("Screenshot collection is not supported by the scan engine. No target screenshots have been collected. Use HTTP Headers, Technologies and Reports for the available observations.")
@@ -371,6 +374,7 @@ class Window(QMainWindow):
         if snapshot:
             for key, rows in dashboard_rows(snapshot).items():
                 if key in self.result_views: self.result_views[key].set_records(rows)
+            self.result_views["results"].set_records(snapshot.get("results", []))
             data = overview_data(snapshot)
             for key, columns in (('domains', ['subdomain', 'ip_address', 'status']),
                                  ('ips', ['address', 'hostnames', 'location', 'asn'])):
@@ -627,7 +631,7 @@ class Window(QMainWindow):
     def compare(self):
         index = self.scans.currentIndex()
         if index >= 0 and index + 1 < self.scans.count():
-            changes = compare_snapshots(self.repo.snapshot(self.scans.itemData(index + 1)), self.repo.snapshot(self.scans.currentData()))
+            changes = compare_snapshots(self.repo.snapshot(self.scans.itemData(index + 1)), self.repo.snapshot(self.scans.currentData()), include_persistent=True)
             self.views["comparison"].setPlainText(json.dumps(changes, indent=2))
             self.tabs.setCurrentWidget(self.views["comparison"])
             self.advanced.show()
@@ -645,6 +649,16 @@ class Window(QMainWindow):
 
     def closeEvent(self, event):
         self.cancel.set()
+        if self.worker is not None or self.local_jobs:
+            # Keep signal owners and widgets alive until bounded jobs finish.
+            # Event processing continues, so completion callbacks can drain jobs.
+            if not self._closing:
+                self._closing = True
+                self.setEnabled(False)
+                self.status.setText("Closing after active local tasks finish; cancellation requested.")
+            event.ignore()
+            QTimer.singleShot(50, self.close)
+            return
         super().closeEvent(event)
 
 

@@ -27,7 +27,7 @@ def main():
     else:
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from PySide6.QtCore import QThreadPool, qInstallMessageHandler, QtMsgType
+    from PySide6.QtCore import QThreadPool, QCoreApplication, QEvent, qInstallMessageHandler, QtMsgType
     from PySide6.QtWidgets import QApplication, QFileDialog, QDialog, QTextEdit
     import dns.resolver
     from cyberrecon.gui import Window
@@ -145,6 +145,8 @@ def main():
         report['status'] = 'FAIL'; report['error'] = type(exc).__name__ + ': ' + str(exc)
     finally:
         window.close(); QThreadPool.globalInstance().waitForDone(45000); app.processEvents()
+        window.close(); window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete); app.processEvents()
         server.shutdown(); server.server_close(); thread.join(timeout=3)
         qInstallMessageHandler(previous_handler)
         (output / 'verification.json').write_text(json.dumps(report, indent=2) + '\n')

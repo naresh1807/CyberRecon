@@ -88,7 +88,7 @@ def test_workflow_storage_and_comparison(tmp_path):
     repo.save(second, "assets", "new.example.org", {}, "fixture")
     repo.finish(second, [])
     changes = compare_snapshots(snapshot, repo.snapshot(second))
-    assert {row["status"] for row in changes} == {"NEW", "REMOVED"}
+    assert {row["status"] for row in changes} == {"NEW", "NOT_OBSERVED"}
     assert (tmp_path / "scans" / first / "apis.json").exists()
     with pytest.raises(ValueError):
         repo.evidence("../../escape", "raw.txt", b"test")
