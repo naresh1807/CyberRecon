@@ -1,8 +1,18 @@
 # CyberRecon v0.2.0 production-readiness qualification
 
-Date: 2026-10-10 (Asia/Kolkata). Decision: **NOT APPROVED FOR PRODUCTION RELEASE**. Publication, package uploads, releases and deployment remain disabled. The target has no Git repository; no Git history was created, rewritten or pushed. The original project is read-only and protected by before/after full-file hashes.
+Date: 2026-10-10 (Asia/Kolkata). Decision: **NOT APPROVED FOR PRODUCTION RELEASE**. Publication, package uploads, releases and deployment remain disabled. At the time of the historical qualification below, the target had no Git repository. The post-push audited baseline is now commit `36b9505665b785d151fb65950bcab84e10b9dd71`; local remediation remains uncommitted. The original project is read-only and protected by before/after full-file hashes.
 
-## Latest blocker review — 2026-10-10
+## Current local remediation — 2026-10-10
+
+Production release remains **NOT APPROVED / BLOCKED**. The post-push read-only audit reproduced 300 Python tests passed, 0 failed, 3 skipped, plus 6 Go tests with race detection and vet passing. These describe the tracked baseline, not a completed Kali/Parrot lifecycle or trusted release. After the scoped local patch, the complete Python suite independently passed again: **300 passed, 0 failed, 3 skipped**, exit 0. `git diff --check`, JSON parsing, historical-snapshot preservation, ignore probes and existing artifact checksums passed. Go was not rerun for this patch because its source is unchanged; the six-test Go result above belongs to the preceding audit. Test output is temporary local evidence, not public attestation.
+
+The baseline now has Git history and was verified against GitHub main during that audit. This resolves absence of a repository, not independent review, reproducibility or artifact-to-commit traceability. Existing artifacts predate these edits and were not rebuilt, replaced or newly qualified. No staging, commit, push, tagging, signing, publication or deployment is part of this patch.
+
+Remaining mandatory blockers: disposable Kali and Parrot fresh-install/menu/reboot/remove/purge/reinstall qualification; a genuine previous-release upgrade; independently trusted production public key and actual signatures; owner-approved protected release infrastructure and identity; and reviewed exact-source artifact provenance. All remain **BLOCKED**; unexecuted scenarios are not passing evidence.
+
+Current machine-readable summary: `release-evidence/production-readiness.json`. The prior summary is preserved unchanged at `release-evidence/history/production-readiness-pre-git-20261010.json`. Sections below retain historical results and commands; their old Git/environment statements describe their execution time, not the present checkout. Local/private evidence paths are not publicly distributed attestations.
+
+## Historical pre-Git blocker review — 2026-10-10
 
 Decision remains **NOT APPROVED**. No publication, upload, push, production signing, deployment, host package transaction or reboot was performed. The following supersedes the older remaining-blocker statuses below. Commands, exit codes, stdout/stderr and configuration-presence results are retained in `.release-qualification/blocker-review/discovery.json`.
 

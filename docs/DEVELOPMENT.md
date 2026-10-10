@@ -15,8 +15,10 @@ Three historical production workflow assertions skip explicitly because the stan
 Source archive build manifests report a deterministic source digest and unknown Git commit/dirty state. Production gates still require reviewed exact-commit qualification; archive provenance does not bypass them.
 
 
-Final-readiness verification is documented in docs/PRODUCTION_READINESS.md and docs/LIFECYCLE_QUALIFICATION.md. The new verification-only CI workflow uses read-only repository permissions and has no secrets, artifact upload or publication steps. It has not run remotely. Signing defaults to candidate validation (`--dry-run`); `--sign` separately requires every existing production gate and protected credentials. Dry-run results explicitly mark signing NOT RUN and production trust BLOCKED.
+Final-readiness verification is documented in docs/PRODUCTION_READINESS.md and docs/LIFECYCLE_QUALIFICATION.md. The new verification-only CI workflow uses read-only repository permissions and has no secrets, artifact upload or publication steps. Remote workflow execution was not verified by the local audit. Signing defaults to candidate validation (`--dry-run`); `--sign` separately requires every existing production gate and protected credentials. Dry-run results explicitly mark signing NOT RUN and production trust BLOCKED.
 
 The development extra declares cryptography for the temporary loopback TLS certificate fixture; it is not a runtime dependency. MANIFEST.in includes tests, scripts, workers and documentation so the standalone sdist is a complete development source tree. Generated environments, historical snapshots and inherited release evidence are excluded from the distribution.
 
 release/constraints-python314.txt and release/tools.txt record the actual audited/tested qualification environment versions. They are platform-specific evidence, not a universal Python/distribution support claim.
+
+The audited baseline is now in Git at `36b9505`. Existing candidate artifacts predate current remediation; a Git commit alone does not qualify provenance or production release. Historical evidence is labeled separately in docs/release-evidence/history/.

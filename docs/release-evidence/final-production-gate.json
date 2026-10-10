@@ -92,5 +92,5 @@
   },
   "publication": "DISABLED",
   "deployment": "DISABLED",
-  "qualification_note": "Independent source archive review; mandatory production blockers remain. Historical evidence is archived and is not current qualification."
+  "qualification_note": "NOT APPROVED. Baseline Git commit now exists, but this uncommitted remediation and existing artifacts lack reviewed exact-commit qualification. Historical/local test evidence does not clear lifecycle or trust gates."
 }

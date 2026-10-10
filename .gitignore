@@ -6,3 +6,53 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Local archives, credentials and user data
+/reference/
+.env
+.env.*
+!.env.example
+/venv/
+/env/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-wal
+*.db-shm
+*.log
+.idea/
+.vscode/
+*.key
+*.p12
+*.pfx
+*.pem
+
+# SSH private keys (public .pub counterparts remain trackable)
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+!id_rsa*.pub
+!id_ed25519*.pub
+!id_ecdsa*.pub
+!id_dsa*.pub
+
+# Named private/signing OpenPGP material; public .asc keys remain trackable
+private*.asc
+secret*.asc
+signing*.asc
+*-private-key.asc
+*-secret-key.asc
+*-signing-key.asc
+
+# Local secrets/configuration; do not exclude general project JSON
+secrets.json
+credentials.json
+.secrets.json
+.credentials.json
+secrets.local.json
+credentials.local.json

@@ -1,3 +1,5 @@
+> **Obsolete workflow instructions:** the `release-apt.yml` dispatch and infrastructure steps below are historical records, not current operator instructions. Only verification CI exists; no publication or production signing is authorized. See PRODUCTION_READINESS.md for current blockers.
+
 > Historical baseline review, retained for provenance. It does not qualify this standalone candidate. Current evidence and signing limits are in PRODUCTION_READINESS.md and PRODUCTION_SIGNING_DRY_RUN.md.
 
 # Production APT Signing Security Review

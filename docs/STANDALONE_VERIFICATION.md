@@ -1,3 +1,5 @@
+> **Historical standalone verification record.** Results below describe the earlier pre-Git qualification and are preserved unchanged. Current status and later validation are in [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). Production remains **NOT APPROVED**.
+
 # Independently reproduced standalone verification
 
 # CyberRecon v0.2.0 production-readiness qualification

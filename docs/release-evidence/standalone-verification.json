@@ -18,5 +18,7 @@
   "original_absolute_paths_in_wheel": 0,
   "original_project_integrity": "PASS",
   "production_publication": "NOT_QUALIFIED",
-  "go_worker": "NOT_BUILT"
+  "go_worker": "NOT_BUILT",
+  "record_kind": "HISTORICAL",
+  "qualification_note": "Initial migration results only; original numerical results preserved. See production-readiness.json for later evidence. Production release remains NOT APPROVED."
 }
