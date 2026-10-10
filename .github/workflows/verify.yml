@@ -1,0 +1,43 @@
+name: CyberRecon verification only
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.26.8'
+      - name: Prepare disposable runner dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils gnupg desktop-file-utils libgl1 libfontconfig1 libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0
+          python -m pip install -r release/tools.txt
+          python -m pip install -c release/constraints-python314.txt -e '.[dev]'
+      - name: Test worker and complete suite
+        run: |
+          mkdir -p dist
+          (cd workers/dns && go test -race ./... && go vet ./... && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../../dist/cyberrecon-dns .)
+          python -m pytest -q
+          python -m compileall -q cyberrecon scripts tests
+          python scripts/verify_cyberrecon_startup.py
+      - name: Build and check local artifacts
+        run: |
+          python -m build --no-isolation
+          python -m twine check dist/*.whl dist/*.tar.gz
+          python scripts/build-cyberrecon-deb.py --worker dist/cyberrecon-dns
+          python scripts/check_release_security.py --artifacts dist
+          python scripts/prepare_cyberrecon_release.py --build-manifest dist --checksums dist
+          (cd dist && sha256sum -c SHA256SUMS)
+          python scripts/verify_release_blockers.py dist
+          python scripts/sign_cyberrecon_release.py dist/cyberrecon_0.2.0-5_amd64.deb --dry-run --output dist/signing-disabled

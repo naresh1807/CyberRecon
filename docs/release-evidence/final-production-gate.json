@@ -1,0 +1,96 @@
+{
+  "decision": "NOT APPROVED",
+  "commit": null,
+  "source_tree_dirty": null,
+  "version": "0.2.0",
+  "package_version": "0.2.0-5",
+  "gates": {
+    "full_tests": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "kali_desktop": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "parrot_desktop": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "fresh_install": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "upgrade": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "reboot": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "remove": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "purge": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "reinstall": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "gui_launcher": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "nonroot_cli": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "scope": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "tls": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "subprocess": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "permissions": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "secrets": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "apt": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "signing": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "license": {
+      "status": "PASS",
+      "evidence": "See docs/PRODUCTION_READINESS.md and .release-qualification/ logs; local checks only, no VM inference."
+    },
+    "maintainer": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    },
+    "workflow": {
+      "status": "BLOCKED",
+      "evidence": "Required real environment/trust/provenance evidence unavailable; see docs/PRODUCTION_READINESS.md."
+    }
+  },
+  "publication": "DISABLED",
+  "deployment": "DISABLED",
+  "qualification_note": "Independent source archive review; mandatory production blockers remain. Historical evidence is archived and is not current qualification."
+}

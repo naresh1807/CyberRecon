@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyberrecon"
+version = "0.2.0"
+description = "Standalone scope-controlled reconnaissance and reporting"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+dependencies = [
+  "PySide6-Essentials>=6.8,<7", "httpx>=0.28,<1", "dnspython>=2.7,<3",
+  "defusedxml>=0.7.1,<1", "networkx>=3.2.1,<4", "numpy>=2,<3",
+  "plotly>=5.20,<8", "reportlab>=4.3,<6"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "build>=1,<2", "twine>=6,<7", "cryptography>=44,<51"]
+
+[project.scripts]
+cyberrecon = "cyberrecon.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cyberrecon*"]
+
+[tool.setuptools.package-data]
+cyberrecon = ["assets/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

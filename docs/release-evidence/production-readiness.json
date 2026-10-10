@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-10",
+  "decision": "NOT APPROVED",
+  "baseline_pytest": {
+    "passed": 275,
+    "failed": 0,
+    "skipped": 4
+  },
+  "final_pytest": {
+    "passed": 296,
+    "failed": 0,
+    "skipped": 3
+  },
+  "sdist_pytest": {
+    "passed": 295,
+    "failed": 0,
+    "skipped": 4
+  },
+  "go": {
+    "tests_passed": 6,
+    "race": "PASS",
+    "vet": "PASS",
+    "build": "PASS",
+    "deterministic_dns": "PASS"
+  },
+  "isolation": "PASS",
+  "live_source_gui": "PASS: Kali xcb UID1000",
+  "installed_wheel_gui": "PASS: Kali xcb UID1000",
+  "owned_loopback_tls_nmap": "PASS",
+  "dependency_audit": "PASS: no known vulnerabilities after isolated pip upgrade",
+  "production_trust": "BLOCKED",
+  "kali_vm_lifecycle": "NOT RUN",
+  "parrot_vm_lifecycle": "NOT RUN",
+  "real_previous_upgrade": "BLOCKED",
+  "git_provenance": "BLOCKED: no Git repository",
+  "publication": "DISABLED",
+  "deployment": "DISABLED",
+  "dependency_audit_scope": "Third-party installed packages; the custom cyberrecon distribution is absent from PyPI and was not advisory-database audited.",
+  "artifact_sha256": {
+    "SHA256SUMS": "d5f4565ca5d220df99336377074a042bae4843ab69694dd5a00ae9e71cdba315",
+    "build-manifest.json": "3185f39c754d64b665b0957932fd2db25e3f7c570c2f3598cd386aa1dcb578d3",
+    "cyberrecon-0.2.0-py3-none-any.whl": "9ffa5efb7e97e63e7a1903515e212f8d6530cb552273f0fcc7c7f6281f5e2cfc",
+    "cyberrecon-0.2.0.tar.gz": "cbd45bc3be8b2387059b34658d285be28f6566250cf80bf517ff768f1a614c72",
+    "cyberrecon-dns": "29887eca071957b02147bffb5f8e5f84ea484dc25816f1fd8f1c53f228bc5aad",
+    "cyberrecon_0.2.0-5_amd64.deb": "1e7fef92e4da9c3a648138bb507e20e680f98052d93f451e5a56954bdf7d3d11"
+  },
+  "source_sha256": "987eca13c488b7b4035f43ef4e16e8b5a695494c6e1903c9a4e8ff3e44597b91",
+  "remaining_references": [
+    {
+      "location": "tests/test_standalone.py",
+      "reason": "Negative import guard rejects the legacy package; no dependency."
+    },
+    {
+      "location": "scripts/verify_release_inputs.py",
+      "reason": "Known original-path literal is used only to detect and reject path coupling."
+    },
+    {
+      "location": "docs/CYBERINTEL_USAGE.md and reference/",
+      "reason": "Clearly superseded documentation and preserved history/backups, outside runtime packaging."
+    },
+    {
+      "location": "scripts/build-cyberrecon-deb.py Homepage",
+      "reason": "Upstream project provenance URL; not an import, installation requirement or runtime path."
+    }
+  ],
+  "evidence_paths": {
+    "target_pytest": ".release-qualification/final-pytest.xml",
+    "sdist_pytest": ".release-qualification/sdist-pytest.xml",
+    "go": ".release-qualification/go-test.jsonl",
+    "installed": ".release-qualification/installed-isolation-gui.json",
+    "static": ".release-qualification/static-artifacts.json",
+    "audit": ".release-qualification/dependency-audit-final.json",
+    "checksums": "dist/SHA256SUMS",
+    "manifest": "dist/build-manifest.json",
+    "dry_run": ".release-qualification/signing-dry-run.json",
+    "original_integrity": ".release-qualification/original-integrity.json"
+  }
+}

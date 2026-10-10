@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-10",
+  "version": "0.2.0",
+  "pytest": {
+    "passed": 275,
+    "skipped": 4,
+    "failed": 0
+  },
+  "cli": "PASS",
+  "syntax": "PASS",
+  "wheel_sdist_build": "PASS",
+  "metadata": "PASS",
+  "isolated_wheel_install": "PASS",
+  "pip_check": "PASS",
+  "source_gui_offscreen": "PASS",
+  "installed_gui_offscreen": "PASS",
+  "runtime_legacy_imports": 0,
+  "original_absolute_paths_in_wheel": 0,
+  "original_project_integrity": "PASS",
+  "production_publication": "NOT_QUALIFIED",
+  "go_worker": "NOT_BUILT"
+}
