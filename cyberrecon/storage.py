@@ -146,6 +146,15 @@ class Repository:
                        (scan, kind, key, json.dumps(value, allow_nan=False)))
         return value
 
+    def update_scan_settings(self, scan, attributes):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT settings FROM scans WHERE id=?", (scan,)).fetchone()
+            if not row:
+                raise ValidationError("Scan does not exist.")
+            settings = {**json.loads(row[0]), **attributes}
+            db.execute("UPDATE scans SET settings=? WHERE id=?", (json.dumps(settings, allow_nan=False), scan))
+
     def recover(self, project):
         """Explicit operator recovery only: never silently cancel another process."""
         self.project(project)
@@ -180,12 +189,13 @@ class Repository:
         project["scope_history"] = self.scope_history(meta["project_id"])
         return {"scan": meta, "project": project, **data}
 
-    def finish(self, scan, warnings, failed=False, cancelled=False):
+    def finish(self, scan, warnings, failed=False, cancelled=False, *, export=True):
         self.snapshot(scan)
         status = "cancelled" if cancelled else "failed" if failed else "partial" if warnings else "complete"
         with self.connection() as db:
             db.execute("UPDATE scans SET status=?,finished_at=?,warnings=? WHERE id=?", (status, utcnow(), json.dumps(warnings), scan))
-        self.export_json(scan, self.managed_directory("scans", scan))
+        if export:
+            self.export_json(scan, self.managed_directory("scans", scan))
 
     def export_json(self, scan, directory):
         snapshot = self.snapshot(scan)

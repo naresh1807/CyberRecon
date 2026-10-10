@@ -74,6 +74,7 @@ def test_table_filter(tmp_path, monkeypatch):
     table = ObservationTable()
     table.setPlainText('[{"host":"example.org"},{"host":"other.org"}]')
     table.filter.setText("example")
-    assert sum(not table.table.isRowHidden(index) for index in range(2)) == 1
+    assert table.table.rowCount() == 1
+    assert table.table.item(0, 0).text() == "example.org"
     table.close()
     app.processEvents()

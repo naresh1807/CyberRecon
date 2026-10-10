@@ -36,7 +36,7 @@ class Links(HTMLParser):
             self.generator = (attributes.get("content") or "")[:256]
         for name, value in attrs:
             if value and (name == "href" or tag == "script" and name == "src" or tag == "form" and name == "action"):
-                self.links.append((value, tag))
+                self.links.append((value, "form:" + attributes.get("method", "GET").upper() if tag == "form" else tag))
 
     def handle_endtag(self, tag):
         if tag == "title":
@@ -48,16 +48,41 @@ class Links(HTMLParser):
 
 
 def scan(repository, project, target, passive=None, crawl=False, history=None,
-         ports=None, udp=False, transport=None, cancel=None, lifecycle=False, go_dns=False, words=None, cve=False, progress=None, ca_bundle=None, nmap_unprivileged=False, nmap_diagnostic=None):
+         ports=None, udp=False, transport=None, cancel=None, lifecycle=False, go_dns=False, words=None, cve=False, progress=None, ca_bundle=None, nmap_unprivileged=False, nmap_diagnostic=None, nmap_profile="service", nmap_timing=3, nmap_timeout=180, nmap_host_timeout=120, nmap_rate=2, nmap_os=False, nmap_scripts=False, max_hosts=30, max_pages=30, max_depth=2, max_requests=100, rate=2, dns_words=None, check_wildcard=False):
+    from .models import ValidationError
+    from .stages import Stages
+    from .discovery import normalize_candidates, safe_navigation
+    for value, upper, name in ((max_hosts, 5000, "hosts"), (max_pages, 500, "pages"), (max_depth, 5, "depth"), (max_requests, 500, "requests"), (rate, 10, "rate")):
+        if type(value) is not int or not 1 <= value <= upper:
+            raise ValidationError("Invalid " + name + " limit.")
     cancel = cancel or threading.Event()
     words = list(dict.fromkeys(word.strip().lstrip("/") for word in words or [] if word.strip()))
     if len(words) > 200 or any(not re.fullmatch(r"[a-zA-Z0-9_./-]{1,100}", word) or ".." in word for word in words):
         raise ValueError("Content discovery accepts at most 200 relative paths without traversal or parameters.")
+    from .subdomains import PROVIDERS
+    selected_providers = passive.split(",") if isinstance(passive, str) else list(passive or [])
+    if any(provider not in PROVIDERS for provider in selected_providers):
+        raise ValidationError("Unsupported passive provider.")
+    if dns_words or check_wildcard:
+        dns_root = repository.scope(project).require(target, passive=True)
+        try:
+            ipaddress.ip_address(dns_root)
+        except ValueError:
+            pass
+        else:
+            raise ValidationError("Active DNS enumeration and wildcard controls require a domain.")
+    if dns_words:
+        from .dns_inventory import wordlist_hosts
+        wordlist_hosts(repository.scope(project).require(target, passive=True), dns_words, repository.scope(project))
+    if type(nmap_timeout) is not int or not 10 <= nmap_timeout <= 600 or type(nmap_rate) is not int or not 1 <= nmap_rate <= 1000:
+        raise ValidationError("Invalid Nmap resource limits.")
+    if udp and nmap_profile == "full":
+        raise ValidationError("Full profile is TCP only; choose bounded UDP ports separately.")
     if udp and ports is None:
         raise ValueError("UDP requires an explicit --ports selection.")
     if ports is not None:
         root = repository.scope(project).require(target)
-        engines.scan_arguments(root, ports)
+        engines.scan_arguments(root, ports, profile=nmap_profile, timing=nmap_timing, host_timeout=nmap_host_timeout, os_detection=nmap_os, default_scripts=nmap_scripts)
     verification, ca_digest = True, None
     if ca_bundle:
         path = Path(ca_bundle)
@@ -71,16 +96,21 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
         verification.load_verify_locations(cadata=data.decode("ascii"))
         ca_digest = hashlib.sha256(data).hexdigest()
     settings = dict(passive=passive, crawl=crawl, history=history, ports=ports, udp=udp, nmap_unprivileged=nmap_unprivileged,
-                    max_pages=30, max_hosts=30, requests=100, rate=2, lifecycle=lifecycle, go_dns=go_dns, content_paths=words, cve=cve, ca_bundle_sha256=ca_digest)
+                    nmap_profile=nmap_profile, nmap_timing=nmap_timing, nmap_timeout=nmap_timeout, nmap_host_timeout=nmap_host_timeout, nmap_rate=nmap_rate, nmap_os=nmap_os, nmap_scripts=nmap_scripts,
+                    max_pages=max_pages, max_hosts=max_hosts, max_depth=max_depth, requests=max_requests, rate=rate, dns_wordlist_enabled=bool(dns_words), check_wildcard=check_wildcard, lifecycle=lifecycle, go_dns=go_dns, content_paths=words, cve=cve, ca_bundle_sha256=ca_digest)
     identifier = repository.start_scan(project, target, settings)
     warnings = []
     verified_urls = set()
     progress = progress or (lambda message: None)
+    progress("Scan job: " + identifier)
+    stages = Stages(repository, identifier, progress)
+    stages.start("validation"); stages.finish("validation")
     scope = lambda: repository.scope(project)
     save = lambda kind, key, value, source, **kw: repository.save(identifier, kind, key, value, source, **kw)
-    def warn(message, exc=None):
+    def warn(message, exc=None, code_override=None):
         code, detail = operation_error(exc) if exc is not None else ("coverage_warning", message)
         message = message + ": " + detail if exc is not None else message
+        code = code_override or code
         warnings.append(message)
         save("errors", str(len(warnings)), {"code": code, "message": message}, "scan workflow", confidence="diagnostic")
 
@@ -97,31 +127,85 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
         root = scope().require(target, passive=True)
         hosts = {root} if scope().allows(root) else set()
         if passive and not cancel.is_set():
-            progress("Passive discovery: " + passive)
-            try:
-                names, metadata = engines.passive_domains(passive, root, scope(), cancel)
-                if passive == "ct":
-                    details = json.loads(metadata)
-                    warnings.extend(details["warnings"])
-                    if details["truncated"]:
-                        warn("Certificate provider coverage is incomplete.")
-            except Exception as exc:
-                warn(f"Passive discovery {passive}", exc)
-                names = []
-            hosts.update(names)
-            for host in names:
-                save("subdomains", host, {"host": host, "verified_current": False}, passive, historical=passive == "ct")
-                edge("domain:" + root, "host:" + host, "contains")
-        if len(hosts) > 30:
-            warn("Host budget reached; only the first 30 sorted hosts were processed.")
-        http = ScopedHTTP(scope, transport=transport, cancel=cancel, verify=verification)
-        effective_go_dns = False
+            from .subdomains import enumerate_hosts
+            stages.start("subdomains")
+            names, outcomes = enumerate_hosts(passive, root, scope(), cancel)
+            for outcome in outcomes:
+                if outcome["status"] != "complete":
+                    warn("Passive provider " + outcome["provider"] + ": " + outcome["status"], code_override=outcome.get("code"))
+            for row in names:
+                hosts.add(row["host"])
+                for provider in row["providers"]:
+                    save("subdomains", row["host"], row, provider, historical=provider == "ct")
+                edge("domain:" + root, "host:" + row["host"], "contains")
+            stages.finish("subdomains", "failed" if outcomes and all(o["status"] == "failed" for o in outcomes) else "partial" if any(o["status"] != "complete" for o in outcomes) else "complete",
+                          providers=outcomes, discovered=len(names), coverage="Configured sources only; not exhaustive.")
+        active_word_hosts = set()
+        if dns_words:
+            from .dns_inventory import wordlist_hosts
+            active_word_hosts = set(wordlist_hosts(root, dns_words, scope()))
+            hosts.update(active_word_hosts)
+            if not passive:
+                stages.start("subdomains", method="opt-in authorized DNS wordlist")
+        selected_hosts = (([root] if root in hosts else []) + sorted(hosts - {root}))[:max_hosts]
+        if len(hosts) > max_hosts:
+            warn("Host budget reached; unprocessed discovered hosts remain in the inventory.")
+        http = ScopedHTTP(scope, transport=transport, cancel=cancel, verify=verification, max_requests=max_requests, rate=rate)
+        if transport is None and not cancel.is_set():
+            from .dns_inventory import resolve_host, resolve_ip, wildcard_control
+            from concurrent.futures import ThreadPoolExecutor
+            stages.start("dns", requested=len(hosts), budget=max_hosts, concurrency=2)
+            dns_hosts = selected_hosts
+            control = {"status": "not checked", "addresses": []}
+            failed_dns = 0
+            if check_wildcard:
+                try:
+                    control = wildcard_control(root, scope, cancel)
+                except Exception as exc:
+                    warn("Wildcard control unavailable", exc)
+                    control = {"status": "failed", "addresses": [], "code": operation_error(exc)[0]}
+                    failed_dns = 1
+            # DNS work is concurrent; storage and progress remain serialized.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                def resolve_inventory(h):
+                    try:
+                        ipaddress.ip_address(h)
+                    except ValueError:
+                        return resolve_host(h, scope, cancel)
+                    return resolve_ip(h, scope, cancel)
+                futures = [(h, pool.submit(resolve_inventory, h)) for h in dns_hosts]
+                for index, (h, future) in enumerate(futures, 1):
+                    try:
+                        records, summary = future.result()
+                        progress(f"DNS {index}/{len(dns_hosts)}: {h}")
+                        summary["wildcard_status"] = control["status"]
+                        summary["possible_wildcard_response"] = bool(set(summary["addresses"]) & set(control["addresses"]))
+                        save("dns", h + ":resolution", summary, "DNS resolver")
+                        save("assets", h, {"host": h, "dns_resolution": summary}, "DNS resolver")
+                        if h in active_word_hosts and summary["addresses"]:
+                            save("subdomains", h, {"host": h, "verified_current": True, "possible_wildcard_response": summary["possible_wildcard_response"]}, "authorized DNS wordlist")
+                        for row in records:
+                            save("dns", dns_key(h, row["type"], row.get("value", row.get("sha256"))), row, "DNS resolver")
+                            if row["type"] in {"A", "AAAA"}:
+                                edge("host:" + h, "ip:" + row["value"], "resolves_to")
+                        if summary["resolution_status"] == "partial":
+                            failed_dns += 1; warn("DNS partial resolution: " + h)
+                    except Exception as exc:
+                        failed_dns += 1; warn("DNS " + h, exc)
+            stages.finish("dns", "partial" if failed_dns or len(hosts) > max_hosts or cancel.is_set() else "complete",
+                          processed=len(dns_hosts), failures=failed_dns, wildcard=control)
+            if active_word_hosts:
+                previous = stages.rows["subdomains"]["status"]
+                stages.finish("subdomains", "partial" if failed_dns or len(hosts) > max_hosts or previous in {"partial", "failed"} else "complete",
+                              active_wordlist={"candidates": len(active_word_hosts), "note": "Only resolved names recorded; wildcard answers remain candidates."})
+        else:
+            stages.finish("dns", "skipped", reason="Injected HTTP transport; DNS not executed" if transport else "cancelled")
         if go_dns and hosts and not cancel.is_set():
             from .go_worker import resolve_hosts
-            progress("Go DNS resolution")
+            progress("Optional Go A/AAAA observations (maximum 30 hosts)")
+            repository.update_scan_settings(identifier, {"go_dns_coverage": {"maximum_hosts": 30, "requested_hosts": len(hosts), "note": "Supplemental worker; Python inventories all selected hosts within the configured host budget."}})
             try:
-                go_results = resolve_hosts(sorted(hosts)[:30], scope(), cancel)
-                effective_go_dns = True
+                go_results = resolve_hosts(selected_hosts[:30], scope(), cancel)
             except Exception as exc:
                 warn("Go DNS unavailable; using the Python resolver", exc)
                 go_results = []
@@ -134,7 +218,10 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                     save("dns", dns_key(row["host"], family, value),
                          {"host": row["host"], "type": family, "value": value}, "Go DNS worker")
                     edge("host:" + row["host"], "ip:" + value, "resolves_to")
-        for host in sorted(hosts)[:30]:
+        web_warning_start = len(warnings)
+        for name in ("http", "technologies", "urls", "apis"):
+            stages.start(name)
+        for host in selected_hosts:
             if cancel.is_set():
                 break
             scope().require(host)
@@ -145,48 +232,10 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 literal_ip = True
             except ValueError:
                 literal_ip = False
-            if transport is None and literal_ip and not cancel.is_set():
-                try:
-                    scope().require(host)
-                    resolver = dns.resolver.Resolver()
-                    resolver.lifetime = 3
-                    answer = resolver.resolve(dns.reversename.from_address(host), "PTR", search=False)
-                    for entry in answer:
-                        value = str(entry).rstrip(".")
-                        save("dns", dns_key(host, "PTR", value), {"host": host, "type": "PTR", "value": value,
-                             "ttl": answer.rrset.ttl, "authorization": "Discovered name is not automatically authorized"}, "DNS resolver")
-                except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-                    pass
-                except Exception as exc:
-                    warn("Reverse DNS " + host, exc)
-            if transport is None and not literal_ip:
-                resolver = dns.resolver.Resolver()
-                resolver.lifetime = 3
-                for family in ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA"):
-                    if cancel.is_set():
-                        break
-                    if effective_go_dns and family in {"A", "AAAA"}:
-                        continue
-                    try:
-                        scope().require(host)
-                        answer = resolver.resolve(host + ".", family, search=False)
-                        for entry in answer:
-                            value = str(entry)
-                            stored = {"host": host, "type": family, "ttl": answer.rrset.ttl}
-                            stored.update({"sha256": hashlib.sha256(value.encode()).hexdigest(), "redacted": True}
-                                          if family == "TXT" else dns_attributes(family, value))
-                            key_value = stored.get("value", value)
-                            save("dns", dns_key(host, family, key_value), stored, "DNS resolver")
-                            if family in {"A", "AAAA"}:
-                                edge("host:" + host, "ip:" + value, "resolves_to")
-                    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-                        continue
-                    except Exception as exc:
-                        warn(f"DNS {host} {family}", exc)
             initial = clean_url(target) if "://" in target and host == root else "https://" + (f"[{host}]" if ":" in host else host) + "/"
-            queue, seen = deque([(initial, 0)]), set()
+            queue, seen = deque([(initial, 0, "target")]), set()
             if crawl:
-                queue.extend((clean_url(path, initial), 1) for path in ("/robots.txt", "/sitemap.xml"))
+                queue.extend((clean_url(path, initial), 1, "public discovery document") for path in ("/robots.txt", "/sitemap.xml"))
             baseline = None
             if words and not cancel.is_set():
                 try:
@@ -198,49 +247,51 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 except Exception as exc:
                     warn("Content discovery calibration unavailable", exc)
             for word in words:
-                queue.append((clean_url(word, initial.rstrip("/") + "/"), 2))
-            while queue and len(seen) < 30 and not cancel.is_set():
-                url, depth = queue.popleft()
-                if url in seen:
+                queue.append((clean_url(word, initial.rstrip("/") + "/"), 1, "wordlist"))
+            while queue and len(seen) < max_pages and not cancel.is_set():
+                url, depth, discovery_source = queue.popleft()
+                if url in seen or not safe_navigation(url):
                     continue
                 seen.add(url)
                 progress(f"HTTP {http.count}/{http.maximum}: {url}")
                 try:
                     result = http.fetch(url)
                     body = result.pop("text")
+                    if result["truncated"]:
+                        warn("HTTP body truncated; discovery coverage incomplete: " + result["url"])
                     cookies = result.pop("cookie_headers")
                     save("http", result["url"], result, "scoped HTTP")
                     from .api import extract
-                    for api in extract(result, body, scope()):
-                        save("apis", api["url"], api, "HTTP/API document extraction")
+                    extracted_apis = extract(result, body, scope())
+                    for api in extracted_apis:
+                        if api.get("coverage_warning"):
+                            warn(api["coverage_warning"])
+                        save("apis", api["url"] + ":" + ",".join(api.get("methods", [])), api, "HTTP/API document extraction")
                         edge("url:" + result["url"], "api:" + api["url"], "describes")
-                        for name in api["parameter_names"]:
+                        for name in api.get("parameter_names", []):
                             edge("api:" + api["url"], "parameter:" + api["url"] + ":" + name, "documents_parameter")
                     save("assets", host, {"host": host, "active_verified": True}, "scoped HTTP")
                     verified_urls.add(result["url"])
                     content_notes = {}
-                    if words and depth == 2:
+                    if discovery_source == "wordlist":
                         content_notes = {"negative_control": baseline, "requires_validation": True,
                                          "possible_wildcard_response": bool(baseline and baseline["status_code"] == result["status_code"] and
                                                                            baseline["body_sha256"] == result["body_sha256"]),
                                          "note": "Compare the negative control and application behavior; response success is not proof of exposure."}
-                    save("urls", result["url"], {"url": result["url"], "status_code": result["status_code"], "verified": True, **content_notes}, "scoped HTTP")
+                    save("urls", result["url"], {"url": result["url"], "status_code": result["status_code"], "content_type": result["headers"].get("content-type", "Unknown"), "redirect_chain": result["redirect_chain"], "discovered_by": discovery_source, "verified": True, "verification_status": "HTTP observed", **content_notes}, discovery_source)
                     actual_host = host_of(result["url"])
                     if actual_host != host:
                         save("assets", actual_host, {"host": actual_host, "active_verified": True}, "scoped HTTP")
                     edge(host_node(actual_host), "url:" + result["url"], "serves")
                     for redirect in result["redirect_chain"]:
+                        save("urls", redirect["from"], {"url": redirect["from"], "status_code": redirect["status"], "redirect_destination": redirect["to"], "verified": True, "verification_status": "redirect observed", "discovered_by": discovery_source}, "scoped redirect")
                         edge("url:" + redirect["from"], "url:" + redirect["to"], "redirects_to")
                     for key, _ in parse_qsl(urlsplit(result["url"]).query, keep_blank_values=True):
                         edge("url:" + result["url"], "parameter:" + result["url"] + ":" + key, "accepts_parameter")
-                    for header in ("server", "x-powered-by"):
-                        value = result["headers"].get(header)
-                        if value:
-                            save("technologies", result["url"] + ":" + header,
-                                 {"banner": value, "url": result["url"], "lifecycle": "UNKNOWN",
-                                  "note": "A self-reported banner is not proof of a vulnerability or exact package version."}, "HTTP " + header,
-                                 confidence="self-reported")
-                            edge("url:" + result["url"], "technology:" + result["url"] + ":" + header, "reports")
+                    from .fingerprints import detect
+                    for detection in detect(result, body, cookies):
+                        save("technologies", result["url"] + ":fingerprint:" + detection["technology"], detection,
+                             "public response fingerprint", confidence=detection["confidence"])
                     if "html" in result["headers"].get("content-type", "").lower():
                         if 200 <= result["status_code"] < 300:
                             from .web_assessment import header_findings
@@ -256,19 +307,7 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                         save("http", result["url"], {**result, "title": parser.title.strip(),
                              "generator": parser.generator}, "scoped HTTP")
                         if parser.generator:
-                            save("technologies", result["url"] + ":generator", {"banner": parser.generator,
-                                 "url": result["url"], "evidence_sha256": result["body_sha256"],
-                                 "verified_version": False}, "HTML generator metadata", confidence="self-reported")
-                        for value, tag in parser.links[:200]:
-                            if tag != "script":
-                                continue
-                            path = urlsplit(value).path.lower()
-                            for library in ("jquery", "react", "vue", "angular", "bootstrap"):
-                                if re.search(r"(?:^|[/._-])" + library + r"(?:[./_-]|$)", path):
-                                    save("technologies", result["url"] + ":script:" + library,
-                                         {"technology": library, "url": result["url"], "verified_version": False,
-                                          "evidence": "Linked script filename indicator", "evidence_sha256": result["body_sha256"]},
-                                         "HTML script link", confidence="candidate")
+                            save("technologies", result["url"] + ":generator", {"banner": parser.generator, "category": "CMS indicator", "classification": "Unknown", "version": "Unknown", "url": result["url"], "evidence_sha256": result["body_sha256"], "note": "Self-reported generator text; not independent product verification."}, "HTML generator metadata", confidence="self-reported")
                         candidates = parser.links
                     elif "javascript" in result["headers"].get("content-type", "").lower() or urlsplit(url).path.lower().endswith(".js"):
                         maps = []
@@ -291,27 +330,37 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                                  "count": len(potential), "character_offsets": potential, "evidence_sha256": result["body_sha256"],
                                  "note": "Pattern matches may be public keys or placeholders. Values are omitted; verify ownership and intended exposure."},
                                  "JavaScript static patterns", confidence="requires-validation")
-                        candidates = [(value, "javascript") for value in re.findall(r'["\'](/[^"\'\s<>]{1,500})["\']', body)[:200]]
+                        candidates = []
                     else:
                         candidates = []
-                    for value, tag in candidates[:200]:
+                    if urlsplit(result["url"]).path.endswith(".map") and "json" in result["headers"].get("content-type", ""):
+                        try:
+                            source_map = json.loads(body)
+                            if isinstance(source_map, dict) and isinstance(source_map.get("sources"), list):
+                                save("javascript", result["url"], {"url": result["url"], "source_map": True, "source_count": len(source_map["sources"]), "source_content_retained": False, "sha256": result["body_sha256"]}, "public source map metadata")
+                        except (ValueError, RecursionError):
+                            pass
+                    candidates = list(dict.fromkeys(candidates + normalize_candidates(result, body, scope())))
+                    for value, tag in candidates[:500]:
                         try:
                             link = clean_url(value, result["url"])
                             if not scope().allows(link):
                                 continue
                             if link not in verified_urls:
-                                save("urls", link, {"url": link, "discovered_by": tag, "verified": False}, "page extraction")
+                                save("urls", link, {"url": link, "discovered_by": tag, "verified": False, "verification_status": "unverified candidate", "crawl_status": "excluded navigation or form" if not safe_navigation(link) or tag.startswith("form") else "candidate"}, tag)
                             edge("url:" + result["url"], "url:" + link, "links_to")
-                            if link not in verified_urls and re.search(r"/(api|graphql|swagger|openapi)(/|\.|$)", urlsplit(link).path, re.I):
-                                save("apis", link, {"url": link, "classification": "candidate", "note": "Endpoint requires validation."}, "page extraction")
-                            if crawl and depth < 2 and len(queue) < 100 and link not in seen:
-                                queue.append((link, depth + 1))
+                            if link not in verified_urls and not any(a["url"] == link for a in extracted_apis) and re.search(r"/(api|graphql|swagger|openapi)(/|\.|$)", urlsplit(link).path, re.I):
+                                save("apis", link + ":", {"url": link, "host": host_of(link), "path": urlsplit(link).path, "method": "Unknown", "authentication": "Unknown", "verification_status": "unverified candidate", "classification": "candidate", "note": "Endpoint requires validation."}, "page extraction")
+                            if crawl and not tag.startswith("form") and safe_navigation(link) and depth < max_depth and len(queue) < max_requests and link not in seen:
+                                queue.append((link, depth + 1, tag))
                         except ValueError:
                             continue
                 except Exception as exc:
                     warn(f"HTTP {url}", exc)
             if queue:
                 warn(f"Crawl page limit reached for {host}.")
+        for name in ("http", "technologies", "urls", "apis"):
+            stages.finish(name, "partial" if len(warnings) > web_warning_start or len(hosts) > max_hosts or cancel.is_set() else "complete", requests=http.count, budget=http.maximum, reason="Results from responses actually collected; configured crawl limits apply.")
         if history and not cancel.is_set():
             progress("Historical URLs: " + history)
             try:
@@ -320,15 +369,27 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 warn(f"Historical {history}", exc)
                 urls = []
             for url in urls[:5000]:
+                if url not in verified_urls:
+                    save("urls", url, {"url": url, "discovered_by": "historical", "verified": False, "verification_status": "historical, unverified"}, history, historical=True)
                 save("historical", url, {"url": url, "verified_current": url in verified_urls}, history, historical=True)
             if len(urls) > 5000:
                 warn("Historical URL limit reached.")
+        if ports is None:
+            stages.finish("nmap", "skipped", reason="Not selected; discovered DNS addresses do not authorize IP scans.")
         if ports is not None and not cancel.is_set():
+            stages.start("nmap", profile=nmap_profile)
             progress("Nmap service inventory: " + root)
             try:
-                records, raw = engines.port_scan(root, scope(), ports, udp, cancel, **({"unprivileged": True} if nmap_unprivileged else {}), **({"diagnostic": nmap_diagnostic} if nmap_diagnostic is not None else {}))
+                records, raw = engines.port_scan(root, scope(), ports, udp, cancel, **({"profile": nmap_profile, "timing": nmap_timing, "timeout": nmap_timeout, "host_timeout": nmap_host_timeout, "rate": nmap_rate, "os_detection": nmap_os, "default_scripts": nmap_scripts} if (nmap_profile, nmap_timing, nmap_timeout, nmap_host_timeout, nmap_rate, nmap_os, nmap_scripts) != ("service", 3, 180, 120, 2, False, False) else {}), **({"unprivileged": True} if nmap_unprivileged else {}), **({"diagnostic": nmap_diagnostic} if nmap_diagnostic is not None else {}))
                 evidence = repository.evidence(identifier, "nmap.xml", raw)
+                if records.get("partial"):
+                    warn("Nmap partial scan; requested port coverage was not completed.")
+                stages.finish("nmap", "partial" if records.get("partial") else "complete",
+                              profile=records.get("profile"), scaninfo=records.get("scaninfo"), reported_ports=records.get("reported_ports"), open_ports=records.get("open_ports"), coverage_note=records.get("coverage_note"), coverage=records.get("coverage"), stage_notes=records.get("stage_notes"), evidence=evidence)
             except Exception as exc:
+                if getattr(exc, "raw_xml", None):
+                    repository.evidence(identifier, "nmap-incomplete.xml", exc.raw_xml)
+                stages.finish("nmap", "failed", code=operation_error(exc)[0])
                 warn("Nmap unavailable or incomplete", exc)
                 records, evidence = {"records": [], "hosts": []}, None
             for row in records["records"]:
@@ -338,7 +399,7 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 edge("ip:" + row["ip"], "port:" + key, "exposes")
                 edge("port:" + key, "service:" + key + ":" + row["service"], "runs")
                 if row["product"]:
-                    save("technologies", key, {"product": row["product"], "version": row["version"],
+                    save("technologies", key, {"technology": row["product"], "category": "Network service", "classification": "Confirmed" if row.get("detection_method") == "probed" else "Likely", "evidence": evidence, "product": row["product"], "version": row["version"],
                          "cpe": row["cpe"], "lifecycle": "UNKNOWN", "note": "Validate version and distribution backports before assessing CVEs."}, "Nmap", confidence="engine-observed")
                     edge("service:" + key + ":" + row["service"], "technology:" + key, "reports")
             for row in records["hosts"]:
@@ -357,11 +418,23 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
             from .intelligence import enrich_cves
             warnings.extend(enrich_cves(repository, identifier, cancel=cancel))
     except KeyboardInterrupt:
+        stages.close(cancelled=True)
         repository.finish(identifier, warnings + ["Interrupted by operator."], cancelled=True)
         raise
     except Exception as exc:
         warn("Workflow", exc)
+        stages.close(cancelled=cancel.is_set(), failed=True)
         repository.finish(identifier, warnings, failed=True, cancelled=cancel.is_set())
         return identifier
-    repository.finish(identifier, warnings, cancelled=cancel.is_set())
+    stages.close(cancelled=cancel.is_set())
+    stages.start("normalization"); stages.finish("normalization")
+    stages.start("reports")
+    try:
+        repository.finish(identifier, warnings, cancelled=cancel.is_set())
+        stages.finish("reports", directory="managed scan JSON exports")
+        repository.export_json(identifier, repository.managed_directory("scans", identifier))
+    except Exception as exc:
+        warn("Managed JSON report generation failed; observations remain in the database", exc)
+        stages.finish("reports", "failed", code=operation_error(exc)[0])
+        repository.finish(identifier, warnings, cancelled=cancel.is_set(), export=False)
     return identifier

@@ -8,7 +8,11 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from .models import ValidationError
 
-def scan_arguments(targets, ports="", vulnerabilities=False):
+def scan_arguments(targets, ports="", vulnerabilities=False, *, profile="service", timing=3, host_timeout=120, os_detection=False, default_scripts=False):
+    if profile not in {"quick", "service", "full"} or type(timing) is not int or not 0 <= timing <= 4 or type(host_timeout) is not int or not 10 <= host_timeout <= 600:
+        raise ValidationError("Invalid Nmap profile, timing (0–4) or host timeout (10–600 seconds).")
+    if vulnerabilities:
+        raise ValidationError("Vulnerability scripts are not supported by inventory profiles.")
     if not isinstance(targets, str) or len(targets) > 4096 or not isinstance(ports, str) or len(ports) > 8192:
         raise ValidationError("Invalid Nmap argument text or size.")
     values = re.split(r"[\s,]+", targets.strip())
@@ -23,11 +27,23 @@ def scan_arguments(targets, ports="", vulnerabilities=False):
         raise ValidationError("Scan IPv4 and IPv6 in separate batches.")
     if any(ipaddress.ip_address(value).is_multicast or ipaddress.ip_address(value).is_unspecified for value in addresses):
         raise ValidationError("Multicast and unspecified addresses cannot be scanned.")
-    args = ["-sT", "-sV", "--version-light", "-n", "-Pn", "-T3", "--max-retries", "1",
-            "--host-timeout", "120s", "--script-timeout", "30s"]
+    args = ["-sT", "-n", "-Pn", "-T" + str(timing), "--max-retries", "1",
+            "--host-timeout", str(host_timeout) + "s", "--script-timeout", "30s"]
+    if profile != "quick":
+        args += ["-sV", "--version-light"]
+    if os_detection:
+        args += ["-O", "--osscan-limit"]
+    if default_scripts:
+        args += ["--script", "default and safe"]
+    if profile == "full":
+        if ports.strip():
+            raise ValidationError("Full TCP profile selects 1–65535; do not combine with custom ports.")
+        args += ["-p", "1-65535"]
     if families == {6}:
         args.append("-6")
-    if ports.strip():
+    if profile == "full":
+        pass
+    elif ports.strip():
         selected = set()
         for part in ports.strip().split(","):
             if not re.fullmatch(r"\d{1,5}(?:-\d{1,5})?", part.strip()):
@@ -42,28 +58,37 @@ def scan_arguments(targets, ports="", vulnerabilities=False):
         args += ["-p", ",".join(str(port) for port in sorted(selected))]
     else:
         args += ["--top-ports", "100"]
-    if vulnerabilities:
-        args += ["--script", "vulners"]
     return args, addresses
 
-def parse_scan(payload):
+def parse_scan(payload, *, allow_partial=False):
     if not isinstance(payload, bytes):
         raise ValidationError("Nmap XML must be bytes.")
     if len(payload) > 16 * 1024 * 1024 or b"<!ENTITY" in payload.upper():
         raise ValidationError("Nmap output exceeds limits or contains XML entities.")
     try:
         root = ET.fromstring(payload, forbid_dtd=False, forbid_entities=True, forbid_external=True)
-    except (ET.ParseError, DefusedXmlException) as exc:
-        raise ValidationError("Nmap did not produce valid XML output.") from exc
+    except ET.ParseError as exc:
+        if not allow_partial or not re.search(br"<nmaprun(?:\s|>)", payload):
+            raise ValidationError("Nmap did not produce valid XML output.") from exc
+        # Recover only fully closed host elements. Never invent the missing tail.
+        fragments = re.findall(br"<host(?:\s[^>]*)?>.*?</host>", payload, re.S)
+        root = ET.fromstring(b"<nmaprun>" + b"".join(fragments) + b"</nmaprun>", forbid_dtd=True, forbid_entities=True, forbid_external=True)
+    except DefusedXmlException as exc:
+        raise ValidationError("Nmap did not produce safe XML output.") from exc
     if root.tag != "nmaprun":
         raise ValidationError("This is not Nmap XML output.")
     finished = root.find("runstats/finished")
-    if finished is None or finished.get("exit") != "success":
+    if not allow_partial and (finished is None or finished.get("exit") != "success"):
         raise ValidationError("Nmap scan did not finish successfully.")
     records, hosts = [], []
     for host in root.findall("host"):
         addresses = [a.get("addr", "") for a in host.findall("address") if a.get("addrtype") in {"ipv4", "ipv6"}]
-        address = ", ".join(addresses)
+        try:
+            if len(addresses) != 1:
+                raise ValueError()
+            address = str(ipaddress.ip_address(addresses[0]))
+        except ValueError:
+            raise ValidationError("Nmap host must have one valid IP address.") from None
         hosts.append({"ip": address, "status": host.find("status").get("state", "unknown") if host.find("status") is not None else "unknown",
                       "timed_out": host.get("timedout") == "true",
                       "timing": {key: host.get(key) for key in ("starttime", "endtime") if host.get(key)},
@@ -88,5 +113,9 @@ def parse_scan(payload):
                             "confidence": attrs.get("conf", ""), "detection_method": attrs.get("method", ""),
                             "cpe": [item.text for item in service.findall("cpe")] if service is not None else [],
                             "script_findings": scripts})
-    return {"records": records, "hosts": hosts, "nmap_version": root.get("version", ""), "completion": dict(finished.attrib),
-            "note": "Service versions and OS hints are observations, not proof. Vulners matches are potential vulnerabilities requiring validation; no matches does not establish safety. Host timeouts can leave incomplete results. UDP and full OS fingerprinting are not included."}
+    return {"records": records, "hosts": hosts, "nmap_version": root.get("version", ""), "completion": dict(finished.attrib) if finished is not None else {},
+            "partial": finished is None or finished.get("exit") != "success" or any(h["timed_out"] for h in hosts),
+            "scaninfo": [dict(item.attrib) for item in root.findall("scaninfo")],
+            "reported_ports": len(records), "open_ports": sum(r["state"] == "open" for r in records),
+            "coverage_note": "scaninfo describes requested coverage; partial runs do not prove every requested port was attempted. Summarized extraports do not identify individual port numbers.",
+            "note": "Service versions and OS hints are observations, not proof. Vulners matches are potential vulnerabilities requiring validation; no matches does not establish safety. Host timeouts can leave incomplete results. OS, UDP and scripts depend on the explicitly selected profile; absent results are not proof of absence."}

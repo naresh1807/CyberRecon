@@ -52,7 +52,7 @@ def test_dashboard_real_storage_partial_and_scope(tmp_path, monkeypatch):
     rows = dashboard_rows(snapshot)
     assert snapshot['scan']['status'] == 'partial'
     assert any(row.get('title') == 'Owned fixture' for row in snapshot['http'])
-    assert any(row.get('technology') == 'jquery' and row['confidence'] == 'candidate' for row in rows['technologies'])
+    assert any(row.get('technology') == 'jQuery' and row['confidence'] == 'indicator' and row['classification'] == 'Likely' and row['evidence'] for row in rows['technologies'])
     assert any(row.get('banner') == 'Fixture CMS' for row in rows['technologies'])
     assert rows['evidence'] and not rows['ports']
     assert all(url.startswith('http://127.0.0.1/') for url in requests)
@@ -72,7 +72,7 @@ def test_simple_gui_and_authorization_cancel(tmp_path, monkeypatch):
     try:
         window.show()
         app.processEvents()
-        assert window.navigation.count() == len(SECTIONS) == 13
+        assert window.navigation.count() == len(SECTIONS) == 17
         assert [field for field in window.findChildren(QLineEdit) if field.isVisible()] == [window.target]
         monkeypatch.setattr(QInputDialog, 'getText', lambda *args: ('', False))
         window.target.setText('qualitythought.in')

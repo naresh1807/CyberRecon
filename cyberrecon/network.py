@@ -206,8 +206,10 @@ class ScopedHTTP:
                     if decoder and not truncated and not decoder.eof:
                         raise ValidationError("Incomplete gzip response.")
                     allow = {"content-type", "server", "x-powered-by", "strict-transport-security", "content-security-policy",
-                             "x-frame-options", "x-content-type-options", "referrer-policy", "permissions-policy", "allow", "www-authenticate"}
+                             "via", "cf-ray", "x-cache", "x-frame-options", "x-content-type-options", "referrer-policy", "permissions-policy", "allow", "www-authenticate"}
                     headers = {k: v for k, v in response.headers.items() if k in allow}
+                    if "cf-ray" in headers:
+                        headers["cf-ray"] = "present"
                     if "www-authenticate" in headers:
                         headers["www-authenticate"] = headers["www-authenticate"].split(" ", 1)[0]
                     if "content-security-policy" in headers:

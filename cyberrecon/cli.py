@@ -36,7 +36,7 @@ def main(argv=None):
     run = commands.add_parser("scan")
     run.add_argument("target")
     run.add_argument("--project", required=True)
-    run.add_argument("--passive", choices=["ct", "subfinder", "assetfinder", "amass"])
+    run.add_argument("--passive", help="Comma-separated ct,subfinder,assetfinder,amass; independent provider outcomes")
     run.add_argument("--history", choices=["gau", "waybackurls"])
     run.add_argument("--crawl", action="store_true")
     run.add_argument("--lifecycle", action="store_true", help="Send detected product names to endoflife.date for upstream lifecycle metadata")
@@ -46,6 +46,21 @@ def main(argv=None):
     run.add_argument("--ca-bundle", help="Additional trusted PEM CA certificates for an authorized lab; TLS verification stays enabled")
     run.add_argument("--ports", default=None, help="Explicit IP targets only; empty string selects top 100 TCP ports")
     run.add_argument("--udp", action="store_true")
+    run.add_argument("--nmap-profile", choices=["quick", "service", "full"], default="service")
+    run.add_argument("--nmap-timing", type=int, default=3, help="Timing 0–4; no evasion options")
+    run.add_argument("--nmap-timeout", type=int, default=180, help="Overall limit 10–600 seconds; partial coverage is reported")
+    run.add_argument("--nmap-host-timeout", type=int, default=120)
+    run.add_argument("--nmap-rate", type=int, default=2, help="Explicit maximum 1–1000 probes/second")
+    run.add_argument("--nmap-os", action="store_true", help="Opt-in OS hints; requires privileges")
+    run.add_argument("--nmap-scripts", action="store_true", help="Opt-in default AND safe NSE scripts")
+    run.add_argument("--nmap-unprivileged", action="store_true", help="Explicit unprivileged TCP mode")
+    run.add_argument("--max-hosts", type=int, default=30)
+    run.add_argument("--max-pages", type=int, default=30)
+    run.add_argument("--max-depth", type=int, default=2)
+    run.add_argument("--max-requests", type=int, default=100)
+    run.add_argument("--rate", type=int, default=2, help="Shared HTTP rate 1–10 requests/second")
+    run.add_argument("--dns-wordlist", help="Opt-in active DNS: up to 200 labels; wildcard domain scope required")
+    run.add_argument("--check-wildcard", action="store_true", help="Opt-in two random DNS controls; wildcard scope required")
     recovery = commands.add_parser("recover", help="Mark unfinished scans interrupted; use only after stopping scan processes")
     recovery.add_argument("project")
     listing = commands.add_parser("scans")
@@ -97,8 +112,17 @@ def main(argv=None):
                 if path.stat().st_size > 64 * 1024:
                     raise ValueError("Wordlist exceeds 64 KiB.")
                 words = path.read_text().splitlines()
+            dns_words = None
+            if args.dns_wordlist:
+                from pathlib import Path
+                path = Path(args.dns_wordlist)
+                if path.stat().st_size > 64 * 1024:
+                    raise ValueError("DNS wordlist exceeds 64 KiB.")
+                dns_words = path.read_text().splitlines()
             result = scan(repo, args.project, args.target, args.passive, args.crawl, args.history, args.ports, args.udp,
-                          lifecycle=args.lifecycle, go_dns=args.go_dns, words=words, cve=args.cve, ca_bundle=args.ca_bundle)
+                          lifecycle=args.lifecycle, go_dns=args.go_dns, words=words, cve=args.cve, ca_bundle=args.ca_bundle, dns_words=dns_words, check_wildcard=args.check_wildcard,
+                          nmap_profile=args.nmap_profile, nmap_timing=args.nmap_timing, nmap_timeout=args.nmap_timeout, nmap_host_timeout=args.nmap_host_timeout, nmap_rate=args.nmap_rate, nmap_os=args.nmap_os, nmap_scripts=args.nmap_scripts, nmap_unprivileged=args.nmap_unprivileged,
+                          max_hosts=args.max_hosts, max_pages=args.max_pages, max_depth=args.max_depth, max_requests=args.max_requests, rate=args.rate)
             print(json.dumps(repo.snapshot(result)["scan"], indent=2))
             return 0 if repo.snapshot(result)["scan"]["status"] == "complete" else 1
         elif args.command == "export":

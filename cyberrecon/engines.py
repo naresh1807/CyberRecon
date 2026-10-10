@@ -146,13 +146,19 @@ def passive_domains(engine, target, scope, cancel=None):
     return sorted(names), raw
 
 
-def port_scan(target, scope, ports="", udp=False, cancel=None, *, unprivileged=False, diagnostic=None):
+def port_scan(target, scope, ports="", udp=False, cancel=None, *, unprivileged=False, diagnostic=None, profile="service", timing=3, host_timeout=120, timeout=180, rate=2, os_detection=False, default_scripts=False):
     scope.require(target)
     # Strict IP-only target; DNS resolution never implicitly authorizes Nmap.
-    args, addresses = scan_arguments(target, ports)
+    if type(timeout) is not int or not 10 <= timeout <= 600 or type(rate) is not int or not 1 <= rate <= 1000:
+        raise ValidationError("Nmap timeout must be 10–600 seconds and rate 1–1000 probes/second.")
+    if udp and profile == "full":
+        raise ValidationError("Full profile is TCP only; choose bounded UDP ports separately.")
+    if os_detection and (unprivileged or os.name != "posix" or os.geteuid() != 0):
+        raise ToolError("privileges_required", "nmap")
+    args, addresses = scan_arguments(target, ports, profile=profile, timing=timing, host_timeout=host_timeout, os_detection=os_detection, default_scripts=default_scripts)
     for address in addresses:
         scope.require(address)
-    args += ["--max-rate", "2", "--max-parallelism", "2"]
+    args += ["--max-rate", str(rate), "--max-parallelism", "2"]
     if unprivileged:
         if udp:
             raise ValidationError("Unprivileged lab mode supports TCP only.")
@@ -160,14 +166,52 @@ def port_scan(target, scope, ports="", udp=False, cancel=None, *, unprivileged=F
     if udp:
         args[args.index("-sT")] = "-sU"
         if os.name == "posix" and os.geteuid() != 0:
-            raise ValidationError("UDP Nmap requires appropriate privileges; CyberRecon does not elevate itself.")
+            raise ToolError("privileges_required", "nmap")
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "nmap.xml"
-        run_process(["nmap", *args, "-oX", str(output), *addresses], timeout=180, cancel=cancel, output_paths=(output,), **({"diagnostic": diagnostic} if diagnostic is not None else {}))
-        if not output.exists() or output.stat().st_size > 16 * 1024 * 1024:
+        failure = None
+        try:
+            run_process(["nmap", *args, "-oX", str(output), *addresses], timeout=timeout, cancel=cancel, output_paths=(output,), **({"diagnostic": diagnostic} if diagnostic is not None else {}))
+        except ToolError as exc:
+            failure = exc
+            if not output.is_file() or output.is_symlink():
+                raise
+        if output.is_symlink() or not output.exists() or output.stat().st_size > 16 * 1024 * 1024:
             raise ValidationError("Nmap output missing or oversized.")
         payload = output.read_bytes()
-    parsed = parse_scan(payload)
+    try:
+        parsed = parse_scan(payload, allow_partial=True)
+    except ValueError:
+        exc = failure or ToolError("invalid_xml", "nmap")
+        exc.raw_xml = payload
+        raise exc from None
+    if failure:
+        parsed.update(partial=True, failure_code=failure.code)
+    parsed["profile"] = dict(name=profile, protocol="udp" if udp else "tcp", ports=ports or ("1-65535" if profile == "full" else "top-100"), timing=timing, timeout=timeout, rate=rate, os_detection=os_detection, default_scripts=default_scripts)
+    coverage = []
+    protocol = "udp" if udp else "tcp"
+    scaninfo = [r for r in parsed["scaninfo"] if r.get("protocol") == protocol]
+    requested = None
+    if len(scaninfo) == 1 and scaninfo[0].get("numservices", "").isdigit():
+        count = int(scaninfo[0]["numservices"])
+        if 1 <= count <= 65535:
+            requested = count
+    for host in parsed["hosts"]:
+        explicit = sum(r["ip"] == host["ip"] and r["protocol"] == protocol for r in parsed["records"])
+        summaries = host["port_summary"]
+        summarized = sum(int(r["count"]) for r in summaries if r.get("count", "").isdigit() and int(r["count"]) <= 65535)
+        observed = explicit + summarized
+        verified = requested is not None and observed == requested and not host["timed_out"] and not parsed["partial"]
+        coverage.append({"host": host["ip"], "requested_ports": requested, "reported_individual_ports": explicit,
+                         "summarized_ports": summarized, "reported_total_ports": observed, "coverage_verified": verified})
+        if requested is not None and not verified:
+            parsed["partial"] = True
+    if {h["ip"] for h in parsed["hosts"]} != set(addresses):
+        parsed["partial"] = True
+    if profile == "full" and (requested != 65535 or not coverage or not all(c["coverage_verified"] for c in coverage)):
+        parsed["partial"] = True
+    parsed["coverage"] = coverage
+    parsed["stage_notes"] = {"os": "requested; inconclusive if no matches" if os_detection else "skipped (not requested)", "udp": "requested; slower and potentially inconclusive" if udp else "skipped (not requested)", "scripts": "default and safe requested" if default_scripts else "skipped (not requested)"}
     for row in (*parsed["hosts"], *parsed["records"]):
         if row["ip"] not in addresses:
             raise ValidationError("Nmap returned an unexpected target address.")
@@ -202,9 +246,9 @@ def fingerprint(url, scope, cancel=None):
     """Safe native replacement: tool-owned DNS cannot enforce IP exclusions."""
     from .network import ScopedHTTP
     response = ScopedHTTP(lambda: scope, cancel=cancel, max_requests=5).fetch(url)
-    return [{"product": value, "version": "", "url": response["url"],
-             "source": "HTTP " + key, "confidence": "self-reported"}
-            for key, value in response["headers"].items() if key in {"server", "x-powered-by"}]
+    from .fingerprints import detect
+    return detect(response, response["text"], response["cookie_headers"])
+
 
 
 def content_scan(url, scope, words, rate=2, cancel=None):
