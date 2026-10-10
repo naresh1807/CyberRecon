@@ -12,7 +12,7 @@ def export_reports(repository, scan, directory):
     directory = Path(repository.export_json(scan, directory))
     snapshot = repository.snapshot(scan)
     rows = [(kind, row) for kind in KINDS for row in snapshot[kind]]
-    for filename in ("observations.csv", "report.html", "report.pdf"):
+    for filename in ("observations.csv", "results.csv", "report.html", "report.pdf"):
         if (directory / filename).is_symlink():
             raise ValueError("Report destinations cannot be symlinks.")
     with atomic_output(directory / "observations.csv") as temporary:
@@ -21,6 +21,17 @@ def export_reports(repository, scan, directory):
             writer.writerow(["kind", "key", "source", "confidence", "status", "details"])
             for kind, row in rows:
                 values = [kind, row["key"], row["source"], row["confidence"], row["observation_status"], json.dumps(row, ensure_ascii=False)]
+                writer.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
+    fields = ["result_id", "kind", "hostname", "ip_address", "port", "protocol", "title",
+              "severity", "confidence", "verification_status", "sources", "details"]
+    with atomic_output(directory / "results.csv") as temporary:
+        with temporary.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(fields)
+            for result in snapshot["results"]:
+                values = [json.dumps(result, ensure_ascii=False) if field == "details" else
+                          json.dumps(result[field], ensure_ascii=False) if isinstance(result[field], (list, dict))
+                          else str(result[field]) for field in fields]
                 writer.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
     sections = ["<!doctype html><html lang='en'><meta charset='utf-8'><title>CyberRecon report</title>",
                 "<style>body{font:16px system-ui;max-width:1000px;margin:40px auto;padding:20px}pre{white-space:pre-wrap;overflow-wrap:anywhere}h2{border-bottom:1px solid #aaa}</style>",

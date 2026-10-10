@@ -44,7 +44,7 @@ def unified_results(snapshot):
                 address = str(ipaddress.ip_address(address or host or ""))
             except (ValueError, TypeError):
                 address = None
-            stage = STAGES.get(kind)
+            stage = "nmap" if kind == "assets" and "os_matches" in row else STAGES.get(kind)
             stage_result = settings.get("stages", {}).get(stage, {})
             evidence = row.get("evidence") or row.get("evidence_sha256") or row.get("body_sha256") or row.get("sha256")
             variants = row.get("source_observations", [])
@@ -73,6 +73,7 @@ def unified_results(snapshot):
             records.append({"result_id": hashlib.sha256((scan["id"] + "\0" + identifier).encode()).hexdigest(),
                 "asset_id": identifier, "kind": kind, "scan_id": scan["id"], "target": scan.get("target", "Unknown"),
                 "hostname": host or "Unknown", "ip_address": address or "Unknown", "ip_addresses": sorted(host_ips.get(host, set()) | ({address} if address else set())),
+                "service": _known(row.get("service")), "technology": _known(row.get("technology")),
                 "port": _known(row.get("port")), "protocol": _known(row.get("protocol")),
                 "url": row.get("url") if isinstance(row.get("url"), str) and _url_host(row["url"]) else "Unknown", "method": _known(row.get("method")), "methods": row.get("methods", []),
                 "query_variants": row.get("query_variants", []), "query_variant_id": row.get("query_variant_id"),
@@ -88,6 +89,36 @@ def unified_results(snapshot):
                 "scan_profile": {k: settings[k] for k in ("nmap_profile", "ports", "udp", "max_hosts", "max_pages", "max_depth", "requests", "rate") if k in settings},
                 "limitations": limitations, "next_steps": row.get("recommendation") or row.get("next_step") or "Review the recorded source evidence and coverage before drawing conclusions.",
                 "original": row})
+    # Offline projections reuse collected observations; they make no new probes.
+    derived = []
+    for result in records:
+        original = result["original"]
+        observations = []
+        if result["kind"] == "http" and isinstance(original.get("tls"), dict):
+            tls = original["tls"]
+            observations.append(("tls", "TLS", "TLS connection: " + result["url"], tls,
+                                 "verified connection" if tls.get("verified") is True else "Unknown",
+                                 "Review certificate validity and SANs; protocol coverage is limited to the negotiated connection."))
+        if result["kind"] == "assets":
+            matches = original.get("os_matches")
+            if isinstance(matches, list):
+                for match in matches[:100]:
+                    if isinstance(match, dict) and isinstance(match.get("name"), str):
+                        observations.append(("os", "OS fingerprint", match["name"], match,
+                                             "fingerprint; OS not confirmed",
+                                             "Corroborate with authorized asset-owner inventory; Nmap accuracy is a tool estimate, not proof."))
+        for index, (kind, category, title, facts, verification, next_steps) in enumerate(observations):
+            derived.append({**result,
+                "result_id": hashlib.sha256((result["result_id"] + kind + str(index)).encode()).hexdigest(),
+                "kind": kind, "category": category, "title": title, "verification_status": verification,
+                "confidence": "tool estimate" if kind == "os" else result["confidence"],
+                "confidence_levels": ["tool estimate"] if kind == "os" else result["confidence_levels"],
+                "evidence": {"observation_result_id": result["result_id"], "facts": facts, "source_evidence": result["evidence"]},
+                "evidence_available": bool(facts), "next_steps": next_steps,
+                "limitations": result["limitations"] + (["An OS fingerprint is not a confirmed operating system."] if kind == "os" else
+                    ["No protocol-support enumeration was performed; chain availability depends on the runtime public API."]),
+                "original": {"parent_observation": original, "facts": facts}})
+    records.extend(derived)
     variants = []
     for result in records:
         if result["kind"] != "urls": continue

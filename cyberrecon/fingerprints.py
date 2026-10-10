@@ -7,7 +7,7 @@ is bundled or claimed. Versions require a product-specific version pattern.
 import re
 from .models import utcnow
 
-RULESET_VERSION = "2026-10-10.1"
+RULESET_VERSION = "2026-10-10.2"
 # name, category, evidence source, pattern, optional version capture
 RULES = (
     ("nginx", "Web server", "server", r"\bnginx(?:/(\d+(?:\.\d+){0,3}))?"),
@@ -30,8 +30,8 @@ RULES = (
     ("Vite", "Build tool", "html", r"(?:/@vite/client|vite/modulepreload-polyfill)"),
     ("Google Analytics", "Analytics", "html", r"(?:google-analytics\.com/|googletagmanager\.com/gtag/js)"),
     ("Google Tag Manager", "Tag management", "html", r"googletagmanager\.com/gtm\.js"),
-    ("Cloudflare", "CDN / WAF indicator", "server", r"\bcloudflare\b"),
-    ("Cloudflare", "CDN / WAF indicator", "cf-ray", r".+"),
+    ("Cloudflare", "CDN indicator", "server", r"\bcloudflare\b"),
+    ("Cloudflare", "CDN indicator", "cf-ray", r".+"),
     ("CloudFront", "CDN indicator", "via", r"\bCloudFront\b"),
     ("Django", "Backend framework", "cookie_names", r"(?:^|\s)csrftoken(?:\s|$)"),
     ("Laravel", "Backend framework", "cookie_names", r"(?:^|\s)laravel_session(?:\s|$)"),
@@ -69,6 +69,8 @@ def detect(response, body, cookies=()):
         signal_sources = sorted({e["source"] for e in row["evidence"]})
         row["signal_sources"] = signal_sources
         row["confidence"] = "multiple indicators" if len(signal_sources) > 1 else "indicator"
+        if row["category"] == "CDN indicator":
+            row["waf_status"] = "Unknown; CDN indicators do not establish WAF enablement"
         row["verification_status"] = "public indicators observed; product not independently verified"
     asset = ("HTML", "Confirmed") if "html" in content_type and re.search(r"<(?:html|title|body|script|a)(?:\s|>)", body, re.I) else ("CSS", "Likely") if "text/css" in content_type else ("JavaScript", "Likely") if "javascript" in content_type else None
     if asset:

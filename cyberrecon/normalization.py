@@ -24,6 +24,20 @@ def dns_attributes(family, value):
             attributes['preference'] = preference
             value = pieces[1]
         value = '.' if value == '.' else host_of(value)
+    elif family == 'SOA':
+        pieces = value.split()
+        if len(pieces) != 7:
+            raise ValueError('Invalid SOA record')
+        # The RNAME can identify a person; retain its hash, not its value.
+        primary = host_of(pieces[0])
+        timers = pieces[2:]
+        if any(not part.isascii() or not part.isdigit() or not 0 <= int(part) <= 4294967295 for part in timers):
+            raise ValueError('Invalid SOA serial or timer')
+        attributes.update(primary_nameserver=primary,
+                          responsible_party_sha256=hashlib.sha256(pieces[1].encode()).hexdigest(),
+                          responsible_party_redacted=True)
+        attributes.update(zip(('serial', 'refresh', 'retry', 'expire', 'minimum'), map(int, timers)))
+        value = primary + ' [RNAME redacted] ' + ' '.join(str(int(part)) for part in timers)
     elif family in {'CNAME', 'NS'}:
         value = host_of(value)
     attributes['value'] = value

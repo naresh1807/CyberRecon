@@ -237,22 +237,46 @@ class ObservationTable(QWidget):
 
 class ResultsTable(ObservationTable):
     """Global persisted observations with conjunctive metadata filters."""
-    FILTERS = ("severity", "confidence", "sources", "verification_status", "scan_id")
+    FILTERS = ("kind", "category", "severity", "confidence", "sources", "verification_status", "scan_id")
     COLUMNS = ["kind", "hostname", "ip_address", "port", "protocol", "title", "severity", "confidence", "verification_status", "sources"]
 
     def __init__(self, repository):
         self.repository = repository
         self.selectors = {}
+        self.grouping = None
         super().__init__(page_size=50)
-        row = QHBoxLayout()
-        for key in self.FILTERS:
+        row = QGridLayout()
+        for index, key in enumerate(self.FILTERS):
             combo = QComboBox(); combo.setToolTip("Filter " + key.replace("_", " "))
             combo.addItem("All " + key.replace("_", " "), "")
             combo.currentIndexChanged.connect(lambda _, k=key: self.update_selector(k))
-            self.selectors[key] = combo; row.addWidget(combo)
+            self.selectors[key] = combo; row.addWidget(combo, index // 4, index % 4)
         self.layout.insertLayout(1, row)
+        self.grouping = QComboBox()
+        self.grouping.addItem("Ungrouped observations", "")
+        for title, field in (("Domain", "hostname"), ("IP address", "ip_address"), ("Port", "port"),
+                             ("Service", "service"), ("Technology", "technology"), ("Category (TLS / OS / CDN / security)", "category")):
+            self.grouping.addItem("Group by " + title, field)
+        self.grouping.setToolTip("Observed correlations only; grouping does not establish ownership or authorization.")
+        self.grouping.currentIndexChanged.connect(self.apply_filter)
+        self.layout.insertWidget(2, self.grouping)
         self.filter.setPlaceholderText("Search all hosts, IPs, ports, URLs, APIs, technologies and evidence…")
         self.columns = self.COLUMNS
+
+    def filtered_records(self):
+        records = super().filtered_records()
+        field = self.grouping.currentData() if self.grouping is not None else ""
+        if field:
+            # Group all matching records before pagination; never synthesize findings.
+            records.sort(key=lambda record: str(record.get(field, "Unknown")).casefold())
+        return records
+
+    def render(self):
+        super().render()
+        field = self.grouping.currentData() if self.grouping is not None else ""
+        if field:
+            count = len({str(record.get(field, "Unknown")) for record in self.filtered_records()})
+            self.summary.setText(self.summary.text() + f" · {count} observed groups")
 
     def update_selector(self, key):
         self.filters[key] = self.selectors[key].currentData() or ""

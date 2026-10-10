@@ -43,7 +43,7 @@ def main():
             name = str(question.name).rstrip('.')
             family = dns.rdatatype.to_text(question.rdtype)
             values = {'A': ['127.0.0.1', '127.0.0.2'], 'AAAA': ['::1'], 'MX': ['10 mail.owned.test.'],
-                      'NS': ['ns.owned.test.'], 'TXT': ['"Owned public verification record"'], 'CAA': ['0 issue "owned.test"']}
+                      'NS': ['ns.owned.test.'], 'SOA': ['ns.owned.test. hostmaster.owned.test. 1 300 60 86400 120'], 'TXT': ['"Owned public verification record"'], 'CAA': ['0 issue "owned.test"']}
             if name.endswith('owned.test'):
                 if name == 'alias.owned.test' and family in {'A', 'AAAA', 'CNAME'}:
                     reply.answer.append(dns.rrset.from_text(name + '.', 60, 'IN', 'CNAME', 'owned.test.'))
@@ -101,6 +101,8 @@ def main():
         assert summary['resolution_status'] == 'resolved' and len(summary['addresses']) == 3
         assert any(row.get('cname_chain') for row in rows)
         assert all(row['ttl'] == 60 for row in rows)
+        assert any(row['type'] == 'SOA' and row['serial'] == 1 for row in rows)
+        assert 'hostmaster.owned.test' not in json.dumps(rows)
         assert 'Owned public verification record' not in json.dumps(rows)
         control = wildcard_control('owned.test', scope, threading.Event(), resolver)
         assert control['status'] == 'possible wildcard'

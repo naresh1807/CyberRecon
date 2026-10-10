@@ -6,7 +6,7 @@ import dns.exception
 from .normalization import dns_attributes
 from .models import utcnow, ValidationError
 
-TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA")
+TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 
 
 def resolve_host(host, scope, cancel, resolver=None):
@@ -34,6 +34,8 @@ def resolve_host(host, scope, cancel, resolver=None):
                             chain.extend({"from": str(rrset.name).rstrip("."), "to": str(r).rstrip("."), "ttl": rrset.ttl} for r in rrset)
                     row["cname_chain"] = chain[:20]
                 rows.append(row)
+        except (ValueError, TypeError):
+            statuses[family] = "malformed"
         except dns.resolver.NXDOMAIN:
             statuses[family] = "nxdomain"
         except dns.resolver.NoAnswer:
@@ -44,7 +46,7 @@ def resolve_host(host, scope, cancel, resolver=None):
             statuses[family] = "dns_failure"
     addresses = sorted({r["value"] for r in rows if r["type"] in {"A", "AAAA"}})
     summary = {"host": host, "type": "RESOLUTION", "addresses": addresses, "record_statuses": statuses,
-               "resolution_status": "partial" if any(s in {"timeout", "dns_failure", "cancelled"} for s in statuses.values()) else "resolved" if addresses else "unresolved",
+               "resolution_status": "partial" if any(s in {"timeout", "dns_failure", "cancelled", "malformed"} for s in statuses.values()) else "resolved" if addresses else "unresolved",
                "resolved_at": utcnow(), "wildcard_status": "not checked", "exclusive_ip_ownership": "Unknown"}
     return rows, summary
 
@@ -106,5 +108,5 @@ def resolve_ip(host, scope, cancel, resolver=None):
         except dns.exception.DNSException:
             status = "dns_failure"
     return rows, {"host": address, "type": "RESOLUTION", "addresses": [address], "record_statuses": {"PTR": status},
-                  "resolution_status": "partial" if status in {"timeout", "dns_failure", "cancelled"} else "literal_ip",
+                  "resolution_status": "partial" if status in {"timeout", "dns_failure", "cancelled", "malformed"} else "literal_ip",
                   "resolved_at": utcnow(), "wildcard_status": "not applicable", "exclusive_ip_ownership": "Unknown"}

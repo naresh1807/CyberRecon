@@ -54,13 +54,39 @@ def tls_metadata(response):
     if not stream:
         return None
     try:
-        ssl_object = stream.get_extra_info("ssl_object")
+        transport_socket = stream.get_extra_info("socket")
+        ssl_object = transport_socket if isinstance(transport_socket, ssl.SSLSocket) else stream.get_extra_info("ssl_object")
         if not ssl_object:
             return None
         certificate = ssl_object.getpeercert()
-        return {"verified": True, "protocol": ssl_object.version(), "cipher": ssl_object.cipher()[0],
-                "certificate_sha256": hashlib.sha256(ssl_object.getpeercert(True)).hexdigest(),
-                "not_before": certificate.get("notBefore"), "not_after": certificate.get("notAfter")}
+        metadata = {"verified": True, "protocol": ssl_object.version(), "cipher": ssl_object.cipher()[0],
+                    "certificate_sha256": hashlib.sha256(ssl_object.getpeercert(True)).hexdigest(),
+                    "not_before": certificate.get("notBefore"), "not_after": certificate.get("notAfter"),
+                    "protocol_support_status": "NOT RUN; only the negotiated protocol was observed",
+                    "issuer": {key: str(value)[:256] for rdn in certificate.get("issuer", ()) for key, value in rdn
+                               if key in {"commonName", "organizationName", "countryName"}},
+                    "subject_alt_names": [{"type": kind, "value": str(value)[:253]}
+                                          for kind, value in certificate.get("subjectAltName", ())[:200]
+                                          if kind in {"DNS", "IP Address"}],
+                    "san_truncated": len(certificate.get("subjectAltName", ())) > 200,
+                    "chain_status": "NOT RUN; public chain API unavailable", "chain_sha256": []}
+        # Public API on supported runtimes only. Do not use private SSL internals
+        # or infer a chain from the leaf issuer name.
+        chain_reader = getattr(ssl_object, "get_verified_chain", None)
+        if callable(chain_reader):
+            try:
+                chain = chain_reader()
+                if not isinstance(chain, (list, tuple)) or len(chain) > 20 or any(
+                        not isinstance(item, bytes) or len(item) > 1024 * 1024 for item in chain):
+                    metadata["chain_status"] = "unavailable; malformed or oversized chain"
+                elif chain:
+                    metadata["chain_sha256"] = [hashlib.sha256(item).hexdigest() for item in chain]
+                    metadata["chain_status"] = "verified connection chain observed"
+                else:
+                    metadata["chain_status"] = "unavailable; transport returned no chain"
+            except (AttributeError, OSError, ValueError, TypeError):
+                metadata["chain_status"] = "unavailable; transport could not provide chain"
+        return metadata
     except (AttributeError, OSError, ValueError, TypeError, IndexError):
         # Optional transport metadata must not discard a valid HTTP observation.
         return None
