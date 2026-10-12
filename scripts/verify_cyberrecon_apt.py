@@ -50,6 +50,11 @@ def signature(keyring, fingerprint, signature_path, output, data=None):
         if data:
             argv += [str(data)]
         result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    rejected = {'BADSIG', 'ERRSIG', 'EXPSIG', 'EXPKEYSIG', 'REVKEYSIG',
+                'KEYEXPIRED', 'SIGEXPIRED', 'KEYREVOKED', 'NO_PUBKEY', 'NODATA', 'FAILURE'}
+    statuses = [line.split() for line in result.stdout.splitlines() if line.startswith('[GNUPG:] ')]
+    if any(len(line) > 1 and line[1] in rejected for line in statuses):
+        raise ValueError('Expired, revoked, missing or invalid repository signature')
     valid = [line.split() for line in result.stdout.splitlines() if line.startswith('[GNUPG:] VALIDSIG ')]
     if result.returncode or len(valid) != 1 or fingerprint not in (valid[0][2], valid[0][-1]):
         raise ValueError('Repository signature failed or signer fingerprint does not match trusted pin')

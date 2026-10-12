@@ -3,6 +3,9 @@ import ipaddress
 import json
 import os
 import uuid
+import re
+from datetime import datetime
+import httpx
 
 from .network import ScopedHTTP
 from .scope import Scope
@@ -36,16 +39,33 @@ def host_lookup(repository, project, target, provider, transport=None, cancel=No
     else:
         raise ValueError("Provider must be shodan or censys.")
     repository.scope(project).require(address)
-    response = ScopedHTTP(lambda: Scope((hostname,)), max_requests=1, transport=transport, cancel=cancel).fetch(
-        endpoint, parameters=parameters, request_headers=headers)
+    try:
+        response = ScopedHTTP(lambda: Scope((hostname,)), max_requests=1, transport=transport, cancel=cancel).fetch(
+            endpoint, parameters=parameters, request_headers=headers)
+    except (httpx.TransportError, OSError, TimeoutError):
+        # Transport exception URLs/messages may contain provider credentials.
+        raise ValueError(f"{provider} network or TLS request failed; no automatic retries were attempted.") from None
     if response["status_code"] != 200 or response["truncated"]:
         raise ValueError(f"{provider} unavailable (HTTP {response['status_code']}) or response exceeded limits; check account access and retry later.")
-    data = json.loads(response["text"])
+    try:
+        data = json.loads(response["text"])
+    except (ValueError, TypeError):
+        raise ValueError("Malformed provider JSON response.") from None
     if not isinstance(data, dict):
         raise ValueError("Malformed provider response.")
     records = []
     def timestamp(value):
-        return value[:100] if isinstance(value, str) else None
+        if not isinstance(value, str) or len(value) > 100 or key in value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.isoformat() if parsed.tzinfo is not None else None
+        except ValueError:
+            return None
+
+    def service_name(value):
+        # Only a bounded service identifier, never echoed credentials or arbitrary JSON.
+        return value if isinstance(value, str) and key not in value and re.fullmatch(r"[A-Za-z][A-Za-z0-9._+-]{0,63}", value) else "Unknown"
     if provider == "shodan":
         if data.get("ip_str") != address or not isinstance(data.get("ports"), list):
             raise ValueError("Provider returned an unexpected IP or malformed port list.")
@@ -67,7 +87,7 @@ def host_lookup(repository, project, target, provider, transport=None, cancel=No
             if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535 or protocol not in {"tcp", "udp"}:
                 raise ValueError("Malformed provider service.")
             records.append({"host": address, "port": port, "protocol": protocol,
-                            "service": str(service.get("protocol", "unknown"))[:100], "provider_observed_at": timestamp(service.get("scan_time"))})
+                            "service": service_name(service.get("protocol")), "provider_observed_at": timestamp(service.get("scan_time"))})
     identifier = repository.start_scan(project, address, {"provider": provider, "active_requests_to_target": 0})
     try:
         repository.scope(project).require(address)

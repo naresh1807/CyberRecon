@@ -1,8 +1,9 @@
 """Desktop project, scan and observation browser."""
 import json
 import threading
+import time
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, QUrl, Qt, QSize, QTimer
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, QUrl, Qt, QSize, QTimer, QCoreApplication, QEvent
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -267,12 +268,16 @@ class Window(QMainWindow):
         footer = label("CyberRecon · Scope enforced  |  Authorized reconnaissance only  |  Discovered assets do not expand permission", 'muted')
         footer.setWordWrap(True); footer.setAlignment(Qt.AlignCenter); layout.addWidget(footer)
         self.setCentralWidget(root); self.reflow()
+        self.refresh_projects()
         self.views["doctor"].setPlainText("Checking local dependencies and tool versions…")
         self.doctor_worker = LocalWorker(lambda: json.dumps(doctor(repo.home), indent=2))
         self.doctor_worker.signals.done.connect(self.views["doctor"].setPlainText)
         self.doctor_worker.signals.error.connect(self.views["doctor"].setPlainText)
+        # Diagnostics also own queued signals: include them in closeEvent's drain.
+        self.local_jobs.append(self.doctor_worker)
+        self.doctor_worker.signals.done.connect(lambda _: self.local_jobs.remove(self.doctor_worker))
+        self.doctor_worker.signals.error.connect(lambda _: self.local_jobs.remove(self.doctor_worker))
         QThreadPool.globalInstance().start(self.doctor_worker)
-        self.refresh_projects()
 
     def about(self):
         from . import __version__
@@ -667,4 +672,20 @@ def launch(repository):
     # Window owns the dashboard theme; do not change other application windows.
     window = Window(repository)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        # app.quit() can bypass closeEvent while asynchronous diagnostics are alive.
+        # Drain completion callbacks before deleting their signal owners.
+        window.close()
+        deadline = time.monotonic() + 45
+        while window.isVisible() or window.worker is not None or window.local_jobs:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Application shutdown timed out while local tasks were active.")
+            app.processEvents()
+            time.sleep(.01)
+        if not QThreadPool.globalInstance().waitForDone(5000):
+            raise RuntimeError("Application worker shutdown did not complete.")
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()

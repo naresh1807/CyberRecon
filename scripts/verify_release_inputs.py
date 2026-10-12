@@ -44,7 +44,7 @@ def verify(root, artifacts):
             if b'/home/naresh/Desktop/CyberIntel' in z.read(name): raise ValueError('Original path in wheel')
     with tarfile.open(artifacts/'cyberrecon-0.2.0.tar.gz') as t:
         names=set(t.getnames());base='cyberrecon-0.2.0/'
-        required={'USER_MANUAL.md','CYBERRECON.md','scripts/check_release_security.py',
+        required={'cyberrecon_build.py','USER_MANUAL.md','CYBERRECON.md','scripts/check_release_security.py',
                   'scripts/qualify_cyberrecon_release.py','scripts/verify_release_inputs.py',
                   'workers/dns/main.go','workers/dns/main_test.go','workers/dns/go.mod',
                   '.github/workflows/verify.yml','tests/test_release_readiness.py'}

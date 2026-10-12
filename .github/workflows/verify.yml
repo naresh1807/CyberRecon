@@ -33,6 +33,7 @@ jobs:
           python scripts/verify_cyberrecon_startup.py
       - name: Build and check local artifacts
         run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           python -m build --no-isolation
           python -m twine check dist/*.whl dist/*.tar.gz
           python scripts/build-cyberrecon-deb.py --worker dist/cyberrecon-dns

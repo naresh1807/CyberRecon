@@ -13,7 +13,7 @@ def main():
     args = parser.parse_args()
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     sys.path.insert(0, '/usr/share/cyberrecon' if args.package else str(Path(__file__).resolve().parent.parent))
-    from PySide6.QtCore import QTimer, QThreadPool
+    from PySide6.QtCore import QTimer, QThreadPool, QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
     from cyberrecon.gui import Window
     from cyberrecon.storage import Repository
@@ -31,7 +31,10 @@ def main():
         QTimer.singleShot(200, app.quit)
         assert app.exec() == 0
         window.close()
-        QThreadPool.globalInstance().waitForDone(45000)
+        assert QThreadPool.globalInstance().waitForDone(45000)
+        app.processEvents()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
         # Also exercise the CLI's no-subcommand branch, which creates an empty
         # workspace and launches the real application window.
@@ -40,7 +43,11 @@ def main():
         assert cli_main(['--home', str(Path(temporary) / 'cli-workspace')]) == 0
         for widget in app.topLevelWidgets():
             widget.close()
-        QThreadPool.globalInstance().waitForDone(45000)
+        assert QThreadPool.globalInstance().waitForDone(45000)
+        app.processEvents()
+        for widget in app.topLevelWidgets():
+            widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
         print('GUI window and CLI startup/event-loop shutdown: PASS (offscreen)')
     return 0

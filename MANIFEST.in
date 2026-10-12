@@ -1,4 +1,4 @@
-include LICENSE README.md USER_MANUAL.md CYBERRECON.md
+include LICENSE README.md USER_MANUAL.md CYBERRECON.md cyberrecon_build.py
 recursive-include cyberrecon/assets *.svg
 recursive-include scripts *.py *.sh
 recursive-include tests *.py

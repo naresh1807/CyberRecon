@@ -30,3 +30,6 @@ cyberrecon = ["assets/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.cmdclass]
+sdist = "cyberrecon_build.ReproducibleSdist"

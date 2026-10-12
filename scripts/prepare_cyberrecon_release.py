@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_GATES = ('full_tests', 'kali_desktop', 'parrot_desktop', 'fresh_install',
                   'upgrade', 'reboot', 'remove', 'purge', 'reinstall', 'gui_launcher',
                   'nonroot_cli', 'scope', 'tls', 'subprocess', 'permissions',
-                  'secrets', 'apt', 'signing', 'license', 'maintainer', 'workflow')
+                  'secrets', 'apt', 'signing', 'license', 'maintainer', 'workflow',
+                  'full_range_nmap', 'privileged_nmap', 'external_providers',
+                  'source_provenance', 'reproducibility')
 
 
 def production_gate(environment, qualification=None):
@@ -78,8 +80,9 @@ def build_manifest(directory):
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
         dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT))
     digest = hashlib.sha256()
-    inputs = [ROOT / name for name in ('pyproject.toml', 'MANIFEST.in', 'LICENSE', 'README.md', 'USER_MANUAL.md')]
+    inputs = [ROOT / name for name in ('pyproject.toml', 'MANIFEST.in', 'cyberrecon_build.py', 'LICENSE', 'README.md', 'USER_MANUAL.md', 'CYBERRECON.md')]
     inputs += list((ROOT / 'cyberrecon').rglob('*.py')) + list((ROOT / 'cyberrecon/assets').glob('*.svg'))
+    inputs += list((ROOT / 'docs').rglob('*.md')) + list((ROOT / 'workers').rglob('*.md'))
     inputs += list((ROOT / 'scripts').glob('*.py')) + list((ROOT / 'scripts').glob('*.sh'))
     inputs += list((ROOT / 'tests').glob('*.py'))
     inputs += list((ROOT / 'workers').rglob('*.go')) + list((ROOT / 'workers').rglob('go.mod'))
