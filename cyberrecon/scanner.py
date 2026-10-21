@@ -47,6 +47,24 @@ class Links(HTMLParser):
             self.title = (self.title + data)[:512]
 
 
+def _can_try_bare_http_fallback(exc):
+    """Allow a one-time HTTP probe after transport failure, never TLS failure."""
+    if not isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+        return False
+    pending = [exc]
+    seen = set()
+    while pending:
+        cause = pending.pop()
+        if id(cause) in seen:
+            continue
+        seen.add(id(cause))
+        if isinstance(cause, ssl.SSLError):
+            return False
+        pending.extend(item for item in (cause.__cause__, cause.__context__)
+                       if item is not None)
+    return True
+
+
 def scan(repository, project, target, passive=None, crawl=False, history=None,
          ports=None, udp=False, transport=None, cancel=None, lifecycle=False, go_dns=False, words=None, cve=False, progress=None, ca_bundle=None, nmap_unprivileged=False, nmap_diagnostic=None, nmap_profile="service", nmap_timing=3, nmap_timeout=180, nmap_host_timeout=120, nmap_rate=2, nmap_os=False, nmap_scripts=False, max_hosts=30, max_pages=30, max_depth=2, max_requests=100, rate=2, dns_words=None, check_wildcard=False):
     from .models import ValidationError
@@ -236,8 +254,7 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 literal_ip = False
             initial = clean_url(target) if "://" in target and host == root else "https://" + (f"[{host}]" if ":" in host else host) + "/"
             queue, seen = deque([(initial, 0, "target")]), set()
-            if crawl:
-                queue.extend((clean_url(path, initial), 1, "public discovery document") for path in ("/robots.txt", "/sitemap.xml"))
+            discovery_documents_queued = False
             baseline = None
             if words and not cancel.is_set():
                 try:
@@ -258,6 +275,10 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                 progress(f"HTTP {http.count}/{http.maximum}: {url}")
                 try:
                     result = http.fetch(url)
+                    if crawl and not discovery_documents_queued:
+                        queue.extend((clean_url(path, result["url"]), 1, "public discovery document")
+                                     for path in ("/robots.txt", "/sitemap.xml"))
+                        discovery_documents_queued = True
                     body = result.pop("text")
                     if result["truncated"]:
                         warn("HTTP body truncated; discovery coverage incomplete: " + result["url"])
@@ -376,6 +397,12 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
                             continue
                 except Exception as exc:
                     warn(f"HTTP {url}", exc)
+                    if (url == initial and discovery_source == "target" and "://" not in target
+                            and urlsplit(url).scheme == "https" and not cancel.is_set()
+                            and _can_try_bare_http_fallback(exc)):
+                        fallback = clean_url(urlsplit(url)._replace(scheme="http").geturl())
+                        progress("HTTPS connection failed; trying one scoped HTTP fallback: " + fallback)
+                        queue.appendleft((fallback, depth, "HTTP fallback after HTTPS failure"))
             if queue:
                 warn(f"Crawl page limit reached for {host}.")
         for url in route_registry.routes:

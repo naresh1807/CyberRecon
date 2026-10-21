@@ -52,6 +52,15 @@ def test_projection_counts_unique_assets_and_preserves_unknowns(window):
     assert window.cards['technologies'].value.text() == str(len(overview_data(window.repo.snapshot(window.scans.currentData()))['technologies']))
 
 
+def test_scan_completion_preserves_selected_results_view(window):
+    snapshot = fixture_scan(window)
+    window.navigate('dns')
+    selected_row = window.navigation.currentRow()
+    window.finished(snapshot['scan']['id'])
+    assert window.navigation.currentRow() == selected_row
+    assert window.pages.currentWidget() == window.result_views['dns']
+
+
 @pytest.mark.parametrize('key', ['overview', 'domains', 'ips', 'nmap', 'technologies',
     'findings', 'dns', 'tls', 'web', 'screenshots', 'export'])
 def test_tabs_and_sidebar_stay_synchronized(window, key):

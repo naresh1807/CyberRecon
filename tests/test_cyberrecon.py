@@ -94,6 +94,63 @@ def test_workflow_storage_and_comparison(tmp_path):
         repo.evidence("../../escape", "raw.txt", b"test")
 
 
+@pytest.mark.parametrize("failure_type", [httpx.ConnectError, httpx.ConnectTimeout])
+def test_bare_target_tries_scoped_http_after_https_transport_failure(tmp_path, failure_type):
+    repo = Repository(tmp_path)
+    project = repo.create_project("Owned HTTP fixture", ["example.org"], authority="Owned deterministic fixture")
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        if request.url.scheme == "https":
+            raise failure_type("fixture HTTPS connection failure", request=request)
+        return httpx.Response(200, request=request, headers={"content-type": "text/html"},
+                              text="<title>HTTP fixture</title>")
+
+    snapshot = repo.snapshot(scan(repo, project, "example.org", crawl=True,
+                                  transport=httpx.MockTransport(handler)))
+    assert requests[:2] == ["https://example.org/", "http://example.org/"]
+    assert any(row["url"] == "http://example.org/" for row in snapshot["http"])
+    assert any(row.get("discovered_by") == "HTTP fallback after HTTPS failure"
+               for row in snapshot["urls"])
+    assert snapshot["scan"]["status"] == "partial"
+    assert any("HTTP https://example.org/" in warning for warning in snapshot["scan"]["warnings"])
+
+
+def test_explicit_https_target_does_not_fall_back_to_http(tmp_path):
+    repo = Repository(tmp_path)
+    project = repo.create_project("Owned HTTPS fixture", ["example.org"], authority="Owned deterministic fixture")
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        raise httpx.ConnectError("fixture connection refused", request=request)
+
+    snapshot = repo.snapshot(scan(repo, project, "https://example.org/",
+                                  transport=httpx.MockTransport(handler)))
+    assert requests == ["https://example.org/"]
+    assert snapshot["scan"]["status"] == "partial"
+
+
+def test_tls_certificate_failure_never_triggers_http_fallback(tmp_path):
+    import ssl
+
+    repo = Repository(tmp_path)
+    project = repo.create_project("Owned HTTPS fixture", ["example.org"], authority="Owned deterministic fixture")
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        error = httpx.ConnectError("certificate verification failed", request=request)
+        error.__cause__ = ssl.SSLCertVerificationError("fixture certificate failure")
+        raise error
+
+    snapshot = repo.snapshot(scan(repo, project, "example.org",
+                                  transport=httpx.MockTransport(handler)))
+    assert requests == ["https://example.org/"]
+    assert snapshot["scan"]["status"] == "partial"
+
+
 def test_out_of_scope_scan_creates_nothing(tmp_path):
     repo = Repository(tmp_path)
     project = repo.create_project("Lab", ["example.org"], authority="Test")

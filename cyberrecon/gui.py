@@ -572,7 +572,6 @@ class Window(QMainWindow):
         if any(row["id"] == message for row in self.repo.scans(self.projects.currentData())):
             self.status.setText("Scan " + self.repo.snapshot(message)["scan"]["status"] + " • review coverage and evidence below")
         self.refresh_scans()
-        self.navigation.setCurrentRow(0)
 
     def failed(self, message):
         self.finished(message)
