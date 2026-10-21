@@ -1,4 +1,5 @@
 import importlib.util
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 import subprocess
 import sys
@@ -19,12 +20,32 @@ def test_doctor_distribution_dependency_boundaries(monkeypatch, tmp_path, networ
     monkeypatch.setattr('cyberrecon.doctor.tool_status', lambda *a: {'status': 'OPTIONAL'})
     monkeypatch.setattr('cyberrecon.doctor.importlib.util.find_spec', lambda name: object())
     versions = {'networkx': networkx, 'plotly': plotly, 'numpy': '2.2.4', 'httpx': '0.28.1',
-                'defusedxml': '0.7.1', 'dnspython': '2.7.0', 'PySide6-Essentials': '6.8.2', 'reportlab': '4.3.1'}
+                'defusedxml': '0.7.1', 'dnspython': '2.7.0', 'PySide6': '6.8.2', 'reportlab': '4.3.1'}
     monkeypatch.setattr('cyberrecon.doctor.importlib.metadata.version', versions.__getitem__)
     monkeypatch.setattr('cyberrecon.doctor.importlib.import_module', lambda name: None)
     result = doctor(tmp_path)['dependencies']
     assert result['numpy']['status'] == 'READY'
     assert ('UNSUPPORTED' in (result['networkx']['status'], result['plotly']['status'])) == (expected == 'UNSUPPORTED')
+
+
+def test_doctor_accepts_kali_pyside6_distribution_metadata(monkeypatch, tmp_path):
+    monkeypatch.setattr('cyberrecon.doctor.tool_status', lambda *a: {'status': 'OPTIONAL'})
+    monkeypatch.setattr('cyberrecon.doctor.importlib.util.find_spec', lambda name: object())
+
+    def version(name):
+        if name == 'PySide6':
+            return '6.10.3'
+        if name == 'PySide6-Essentials':
+            raise PackageNotFoundError(name)
+        return {'defusedxml': '0.7.1', 'httpx': '0.28.1', 'dnspython': '2.8.0',
+                'networkx': '3.4.2', 'numpy': '2.4.6', 'plotly': '5.20.0', 'reportlab': '5.0.0'}[name]
+
+    monkeypatch.setattr('cyberrecon.doctor.importlib.metadata.version', version)
+    monkeypatch.setattr('cyberrecon.doctor.importlib.import_module', lambda name: None)
+    result = doctor(tmp_path)['dependencies']['PySide6']
+    assert result['installed'] is True
+    assert result['version'] == '6.10.3'
+    assert result['status'] == 'READY'
 
 
 def test_debian_declares_graph_dependencies(tmp_path):

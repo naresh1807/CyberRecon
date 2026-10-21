@@ -35,6 +35,19 @@ DEPENDENCY_RANGES = {"defusedxml": ((0, 7, 1), 1), "httpx": ((0, 28), 1), "dnspy
                      "networkx": ((3, 2, 1), 4), "numpy": ((2, 0), 3), "plotly": ((5, 20), 8), "reportlab": ((4, 3), 6)}
 
 
+def dependency_version(package):
+    # Debian exposes the binding as PySide6, while some wheel layouts expose
+    # only the Essentials distribution. Accept both without masking other
+    # metadata errors.
+    distributions = ("PySide6", "PySide6-Essentials") if package == "PySide6" else (package,)
+    for distribution in distributions:
+        try:
+            return importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    raise importlib.metadata.PackageNotFoundError(package)
+
+
 def tool_status(name, capability):
     executable = shutil.which(name)
     on_path = bool(executable)
@@ -90,7 +103,7 @@ def doctor(home=None, wordlist=None):
         installed, version = False, None
         try:
             installed = importlib.util.find_spec(module) is not None
-            version = importlib.metadata.version("PySide6-Essentials" if package == "PySide6" else package) if installed else None
+            version = dependency_version(package) if installed else None
             status = "MISSING"
             if installed:
                 importlib.import_module(module)
