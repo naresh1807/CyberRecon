@@ -131,9 +131,9 @@ class Window(QMainWindow):
         self.excludes.setPlaceholderText("Comma-separated exclusions; override allowed scope")
         self.authority.setPlaceholderText("Ownership or written authorization reference")
         self.passive, self.history = QComboBox(), QComboBox()
-        self.passive.addItems(["None", "ct", "ct,subfinder,assetfinder", "subfinder", "assetfinder", "amass"])
+        self.passive.addItems(["None", "ct", "ct,dnsdumpster", "dnsdumpster", "ct,subfinder,assetfinder", "subfinder", "assetfinder", "amass"])
         self.passive.setCurrentText("ct")
-        self.passive.setToolTip("Default: query public certificate-transparency services. Results are historical observations, not proof of current DNS. Child names outside Allowed scope are discarded; add wildcard scope only when authorized.")
+        self.passive.setToolTip("Default: query public certificate-transparency services. DNSDumpster is optional and requires DNSDUMPSTER_API_KEY in the launch environment. Provider records are historical and unverified; child names outside Allowed scope are discarded. Add wildcard scope only when authorized.")
         self.history.addItems(["None", "gau", "waybackurls"])
         self.lifecycle, self.go_dns = QCheckBox("Upstream lifecycle lookup"), QCheckBox("Go DNS worker")
         self.enable_ports = QCheckBox("Nmap TCP inventory for explicitly authorized IP targets")
@@ -177,6 +177,7 @@ class Window(QMainWindow):
             "Nmap is IP-only. Full profile selects ports 1–65535; bounded timeouts can leave partial coverage. UDP/OS/NSE require opt-in; no privilege elevation.\n"
             "GUI Start Recon defaults to scoped DNS, HTTP/TLS, technology checks, a bounded crawl and public CT lookup. "
             "Subdomains outside Allowed scope are discarded; include a wildcard only when authorized.\n"
+            "DNSDumpster is optional and needs DNSDUMPSTER_API_KEY in the environment; its records are provider observations, not current verification. "
             "External history, lifecycle/NVD, active DNS wordlists, OS/UDP/NSE remain opt-in. "
             "Host intelligence uses configured environment credentials; keys are never saved here.")
         root = QWidget(); root.setObjectName("root")
@@ -227,8 +228,8 @@ class Window(QMainWindow):
             self.cards[key] = SummaryCard(title, glyph, accent)
         workspace_layout.addLayout(self.cards_layout)
         self.dashboard_tabs = QTabBar(); self.dashboard_tabs.setExpanding(False); self.dashboard_tabs.setUsesScrollButtons(True)
-        self.tab_keys = ['overview', 'domains', 'ips', 'nmap', 'technologies', 'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'evidence', 'history', 'urls', 'apis', 'frontend', 'backend', 'results']
-        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Vulnerabilities', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend', 'All Results'):
+        self.tab_keys = ['overview', 'domains', 'ips', 'nmap', 'technologies', 'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'evidence', 'history', 'urls', 'apis', 'frontend', 'backend', 'results', 'dnsdumpster']
+        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Vulnerabilities', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend', 'All Results', 'DNSDumpster'):
             self.dashboard_tabs.addTab(text)
         workspace_layout.addWidget(self.dashboard_tabs); workspace_layout.addWidget(self.pages, 1)
         body.addWidget(workspace, 1); layout.addLayout(body, 1)

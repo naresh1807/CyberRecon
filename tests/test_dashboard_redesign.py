@@ -62,7 +62,7 @@ def test_scan_completion_preserves_selected_results_view(window):
 
 
 @pytest.mark.parametrize('key', ['overview', 'domains', 'ips', 'nmap', 'technologies',
-    'findings', 'dns', 'tls', 'web', 'screenshots', 'export'])
+    'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'dnsdumpster'])
 def test_tabs_and_sidebar_stay_synchronized(window, key):
     tab = window.tab_keys.index(key)
     window.dashboard_tabs.setCurrentIndex(tab)
@@ -74,12 +74,33 @@ def test_tabs_and_sidebar_stay_synchronized(window, key):
     assert window.dashboard_tabs.currentIndex() == tab
 
 
-def test_gui_default_profile_enables_ct_and_explains_scope(window):
+def test_gui_default_profile_enables_ct_and_explains_scope(window, monkeypatch):
+    monkeypatch.delenv("DNSDUMPSTER_API_KEY", raising=False)
     assert window.passive.currentText() == "ct"
     assert "public certificate-transparency" in window.passive.toolTip()
     assert "wildcard scope only when authorized" in window.passive.toolTip()
     assert "wildcard only if authorized" in window.includes.placeholderText()
     assert "public CT lookup" in window.description.text()
+    assert "dnsdumpster" in window.passive.toolTip().lower()
+    assert "ct,dnsdumpster" in [window.passive.itemText(i) for i in range(window.passive.count())]
+
+
+def test_dnsdumpster_dashboard_view_renders_and_filters_provider_observations(window):
+    view = window.result_views["dnsdumpster"]
+    view.set_records([
+        {"host": "www.example.org", "record_type": "A", "value": "198.51.100.20",
+         "asn": "64500", "source": "DNSDumpster API", "verified_current": False},
+        {"host": "example.org", "record_type": "NS", "value": "ns1.example.net",
+         "source": "DNSDumpster API", "verified_current": False},
+    ])
+    window.navigate("dnsdumpster")
+    assert window.pages.currentWidget() is view
+    assert view.table.rowCount() == 2
+    assert "Record Type" in [view.table.horizontalHeaderItem(i).text() for i in range(view.table.columnCount())]
+    view.filter.setText("64500")
+    assert view.table.rowCount() == 1
+    view.filter.clear()
+    assert view.table.rowCount() == 2
 
 
 def test_empty_and_narrow_layout(window):

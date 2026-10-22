@@ -3,7 +3,7 @@ import hashlib
 import ipaddress
 from urllib.parse import urlsplit
 
-STAGES = dict(assets="http", subdomains="subdomains", dns="dns", http="http",
+STAGES = dict(assets="http", subdomains="subdomains", dns="dns", dnsdumpster="subdomains", http="http",
               ports="nmap", services="nmap", technologies="technologies", urls="urls",
               apis="apis", javascript="urls", historical="urls", findings="http")
 

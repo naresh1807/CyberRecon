@@ -10,7 +10,7 @@ from .models import ValidationError, utcnow
 from .output import atomic_output
 from .scope import Scope
 
-KINDS = ("assets", "subdomains", "dns", "http", "ports", "services", "technologies", "urls", "apis", "javascript", "historical", "findings", "relationships", "errors")
+KINDS = ("assets", "subdomains", "dns", "dnsdumpster", "http", "ports", "services", "technologies", "urls", "apis", "javascript", "historical", "findings", "relationships", "errors")
 
 
 class Repository:

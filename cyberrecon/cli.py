@@ -36,7 +36,7 @@ def main(argv=None):
     run = commands.add_parser("scan")
     run.add_argument("target")
     run.add_argument("--project", required=True)
-    run.add_argument("--passive", help="Comma-separated ct,subfinder,assetfinder,amass; independent provider outcomes")
+    run.add_argument("--passive", help="Comma-separated ct,dnsdumpster,subfinder,assetfinder,amass; DNSDumpster requires DNSDUMPSTER_API_KEY")
     run.add_argument("--history", choices=["gau", "waybackurls"])
     run.add_argument("--crawl", action="store_true")
     run.add_argument("--lifecycle", action="store_true", help="Send detected product names to endoflife.date for upstream lifecycle metadata")

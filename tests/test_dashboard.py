@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -62,6 +63,67 @@ def test_dashboard_real_storage_partial_and_scope(tmp_path, monkeypatch):
     assert '<script>' not in overview_html(snapshot)
 
 
+def test_dnsdumpster_scan_persists_records_with_provenance_and_dashboard_rows(tmp_path, monkeypatch):
+    from cyberrecon import dnsdumpster
+    from cyberrecon.results import STAGES
+
+    monkeypatch.setenv("DNSDUMPSTER_API_KEY", "FAKE_DNSDUMPSTER_KEY")
+    monkeypatch.setattr(dnsdumpster, "_rate_slot", lambda cancel: None)
+    repo = Repository(tmp_path)
+    project = repo.create_project("owned fixture", ["example.org", "*.example.org"], authority="Mock API only")
+    calls = []
+    def respond(request):
+        calls.append((request.url.host, request.url.path))
+        if request.url.host == "api.dnsdumpster.com":
+            assert request.headers["x-api-key"] == "FAKE_DNSDUMPSTER_KEY"
+            return httpx.Response(200, json={
+                "a": [{"host": "www.example.org", "ips": [{"ip": "198.51.100.20", "asn": "64500", "asn_name": "Fixture ASN"}]}],
+                "cname": [], "mx": [], "ns": [], "txt": ["private-contact@example.org"], "total_a_recs": 1,
+            })
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="owned fixture")
+
+    identifier = scan(repo, project, "https://example.org/", passive="dnsdumpster", crawl=False,
+                      transport=httpx.MockTransport(respond), max_hosts=2)
+    snapshot = repo.snapshot(identifier)
+    assert any(host == "api.dnsdumpster.com" and path == "/domain/example.org" for host, path in calls)
+    assert snapshot["scan"]["status"] == "complete"
+    assert len(snapshot["dnsdumpster"]) == 2
+    assert {row["record_type"] for row in snapshot["dnsdumpster"]} == {"A", "TXT"}
+    assert all(row["source"] == "DNSDumpster API" and row["historical"] for row in snapshot["dnsdumpster"])
+    assert all(row["verified_current"] is False for row in snapshot["dnsdumpster"])
+    assert all(row["observation_status"] == "HISTORICAL" for row in snapshot["dnsdumpster"])
+    assert all(row["value_redacted"] for row in snapshot["dnsdumpster"] if row["record_type"] == "TXT")
+    assert any(row["kind"] == "dnsdumpster" and row["coverage"]["stage"] == "subdomains"
+               for row in snapshot["results"])
+    assert STAGES["dnsdumpster"] == "subdomains"
+    assert len(dashboard_rows(snapshot)["dnsdumpster"]) == 2
+    assert "private-contact" not in json.dumps(snapshot)
+    from cyberrecon.reporting import export_reports
+    output = Path(export_reports(repo, identifier, tmp_path / "provider-export"))
+    assert any(row["kind"] == "dnsdumpster" for row in json.loads((output / "results.json").read_text()))
+    assert "dnsdumpster" in (output / "observations.csv").read_text()
+    assert "198.51.100.20" in (output / "report.html").read_text()
+    assert (output / "report.pdf").read_bytes().startswith(b"%PDF")
+
+
+def test_dnsdumpster_missing_key_is_visible_as_provider_failure(tmp_path, monkeypatch):
+    monkeypatch.delenv("DNSDUMPSTER_API_KEY", raising=False)
+    repo = Repository(tmp_path)
+    project = repo.create_project("owned fixture", ["example.org"], authority="Mock only")
+    requests = []
+    def respond(request):
+        requests.append(request.url.host)
+        assert request.url.host != "api.dnsdumpster.com"
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="owned fixture")
+    snapshot = repo.snapshot(scan(repo, project, "https://example.org/", passive="dnsdumpster", crawl=False,
+                                  transport=httpx.MockTransport(respond)))
+    provider = snapshot["scan"]["settings"]["stages"]["subdomains"]["providers"][0]
+    assert provider["status"] == "failed" and provider["code"] == "api_key_missing"
+    assert "DNSDUMPSTER_API_KEY" in provider["reason"]
+    assert any(row["code"] == "api_key_missing" for row in snapshot["errors"])
+    assert not snapshot["dnsdumpster"] and requests
+
+
 def test_simple_gui_and_authorization_cancel(tmp_path, monkeypatch):
     monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtWidgets import QApplication, QLineEdit, QInputDialog
@@ -72,7 +134,7 @@ def test_simple_gui_and_authorization_cancel(tmp_path, monkeypatch):
     try:
         window.show()
         app.processEvents()
-        assert window.navigation.count() == len(SECTIONS) == 18
+        assert window.navigation.count() == len(SECTIONS) == 19
         assert [field for field in window.findChildren(QLineEdit) if field.isVisible()] == [window.target]
         monkeypatch.setattr(QInputDialog, 'getText', lambda *args: ('', False))
         window.target.setText('qualitythought.in')

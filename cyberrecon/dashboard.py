@@ -8,14 +8,14 @@ from .scope import host_of
 from .network import clean_url
 
 SECTIONS = (
-    ('overview', 'Overview'), ('domains', 'Subdomains'), ('ips', 'IP Addresses'),
+    ('overview', 'Overview'), ('domains', 'Subdomains'), ('dnsdumpster', 'DNSDumpster'), ('ips', 'IP Addresses'),
     ('nmap', 'Nmap Scan'), ('technologies', 'Technologies'), ('findings', 'Vulnerabilities'),
     ('dns', 'DNS'), ('tls', 'SSL/TLS'), ('web', 'HTTP Headers'),
     ('urls', 'Discovered URLs'), ('apis', 'API Inventory'), ('frontend', 'Frontend'), ('backend', 'Backend'),
     ('screenshots', 'Screenshots'), ('evidence', 'Progress & Coverage'),
     ('history', 'Scan History'), ('results', 'All Results'), ('export', 'Reports'))
 
-VIEW_ALIASES = dict(assets='domains', subdomains='domains', dns='dns', http='web', ports='nmap',
+VIEW_ALIASES = dict(assets='domains', subdomains='domains', dns='dns', dnsdumpster='dnsdumpster', http='web', ports='nmap',
                     services='nmap', technologies='technologies', urls='urls', apis='apis',
                     javascript='web', historical='web', findings='findings', relationships='evidence',
                     errors='evidence', hosts='ips')

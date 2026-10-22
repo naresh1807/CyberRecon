@@ -104,7 +104,7 @@ def run_process(args, input_bytes=None, timeout=120, cancel=None, output_paths=(
                 stop()
 
 
-def passive_domains(engine, target, scope, cancel=None):
+def passive_domains(engine, target, scope, cancel=None, transport=None):
     target = scope.require(target, passive=True)
     try:
         ipaddress.ip_address(target)
@@ -125,6 +125,10 @@ def passive_domains(engine, target, scope, cancel=None):
         metadata = {"source": result.source, "reference": result.reference,
                     "warnings": result.data["warnings"], "truncated": result.data["truncated"]}
         return names, json.dumps(metadata).encode()
+    if engine == "dnsdumpster":
+        from .dnsdumpster import lookup
+        names, records, metadata = lookup(target, scope, cancel=cancel, transport=transport)
+        return names, json.dumps({**metadata, "records": records}, allow_nan=False).encode()
     commands = {"subfinder": ["subfinder", "-d", target, "-silent", "-duc", "-rl", "2", "-timeout", "10", "-max-time", "1"],
                 "assetfinder": ["assetfinder", "--subs-only", target],
                 "amass": ["amass", "enum", "-passive", "-d", target, "-timeout", "1"]}

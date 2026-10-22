@@ -147,8 +147,12 @@ class ScopedHTTP:
             raise ValidationError("Unsupported reconnaissance method.")
         url, redirects = clean_url(value), []
         extra = dict(request_headers or {})
-        if any(key.lower() not in {"authorization", "accept", "x-organization-id"} for key in extra):
+        if any(key.lower() not in {"authorization", "accept", "x-organization-id", "x-api-key"} for key in extra):
             raise ValidationError("Unsupported provider request header.")
+        if any(key.lower() == "x-api-key" for key in extra):
+            parts = urlsplit(url)
+            if parts.scheme != "https" or parts.hostname != "api.dnsdumpster.com":
+                raise ValidationError("API key headers are restricted to the DNSDumpster HTTPS API host.")
         if any(not isinstance(value, str) or len(value) > 8192 or "\r" in value or "\n" in value for value in extra.values()):
             raise ValidationError("Invalid provider header value.")
         query = urlencode(parameters) if parameters else None

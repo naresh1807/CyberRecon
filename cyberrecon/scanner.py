@@ -149,10 +149,24 @@ def scan(repository, project, target, passive=None, crawl=False, history=None,
         if passive and not cancel.is_set():
             from .subdomains import enumerate_hosts
             stages.start("subdomains")
-            names, outcomes = enumerate_hosts(passive, root, scope(), cancel)
+            names, outcomes = enumerate_hosts(passive, root, scope(), cancel, transport=transport)
             for outcome in outcomes:
+                provider_records = outcome.pop("records", [])
+                for record in provider_records:
+                    owner = record.get("host")
+                    if not isinstance(owner, str) or not scope().allows(owner):
+                        continue
+                    record_key = hashlib.sha256(json.dumps(
+                        [record.get("record_type"), owner, record.get("value"), record.get("ip")],
+                        ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+                    save("dnsdumpster", record_key, record, "DNSDumpster API",
+                         confidence="provider-observation", historical=True)
                 if outcome["status"] != "complete":
-                    warn("Passive provider " + outcome["provider"] + ": " + outcome["status"], code_override=outcome.get("code"))
+                    detail = outcome.get("reason") or "; ".join(outcome.get("warnings", []))
+                    message = "Passive provider " + outcome["provider"] + ": " + outcome["status"]
+                    if detail:
+                        message += " — " + detail
+                    warn(message, code_override=outcome.get("code"))
             for row in names:
                 hosts.add(row["host"])
                 for provider in row["providers"]:

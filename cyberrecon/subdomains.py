@@ -5,10 +5,10 @@ from .scope import host_of
 from .models import utcnow, ValidationError
 import json
 
-PROVIDERS = ("ct", "subfinder", "assetfinder", "amass")
+PROVIDERS = ("ct", "dnsdumpster", "subfinder", "assetfinder", "amass")
 
 
-def enumerate_hosts(providers, root, scope, cancel, limit=5000):
+def enumerate_hosts(providers, root, scope, cancel, limit=5000, transport=None):
     if isinstance(providers, str):
         providers = providers.split(",")
     providers = list(dict.fromkeys(providers or []))
@@ -20,11 +20,22 @@ def enumerate_hosts(providers, root, scope, cancel, limit=5000):
             outcomes.append({"provider": provider, "status": "skipped", "reason": "cancelled"}); continue
         outcome = {"provider": provider, "started_at": utcnow(), "status": "complete", "warnings": []}
         try:
-            names, raw = engines.passive_domains(provider, root, scope, cancel)
+            if provider == "dnsdumpster":
+                names, raw = engines.passive_domains(provider, root, scope, cancel, transport=transport)
+            else:
+                names, raw = engines.passive_domains(provider, root, scope, cancel)
             if provider == "ct":
                 metadata = json.loads(raw)
                 outcome["warnings"] = metadata.get("warnings", [])
                 if metadata.get("truncated") or outcome["warnings"]:
+                    outcome["status"] = "partial"
+            if provider == "dnsdumpster":
+                metadata = json.loads(raw)
+                outcome["warnings"] = metadata.get("warnings", [])
+                outcome["records"] = metadata.get("records", [])
+                outcome["record_count"] = len(outcome["records"])
+                outcome["coverage_note"] = metadata.get("coverage_note", "Provider coverage is not exhaustive.")
+                if outcome["warnings"]:
                     outcome["status"] = "partial"
             for value in names:
                 try:
@@ -39,7 +50,10 @@ def enumerate_hosts(providers, root, scope, cancel, limit=5000):
                 hosts.setdefault(host, set()).add(provider)
             outcome["accepted_total"] = len(hosts)
         except Exception as exc:
-            code, message = operation_error(exc)
+            if getattr(exc, "code", None) and type(exc).__name__ == "DNSDumpsterError":
+                code, message = exc.code, str(exc)
+            else:
+                code, message = operation_error(exc)
             outcome.update(status="failed", code=code, reason=message)
         outcome["finished_at"] = utcnow(); outcomes.append(outcome)
     return [{"host": h, "providers": sorted(p), "verified_current": False, "discovered_at": utcnow(),

@@ -91,6 +91,21 @@ def test_multiple_providers_normalized_and_independent(monkeypatch):
     assert outcomes[1]['status'] == 'failed' and outcomes[1]['code'] == 'tool_missing'
 
 
+def test_dnsdumpster_provider_records_survive_enumeration(monkeypatch):
+    payload = {"records": [{"host": "www.example.org", "record_type": "A", "value": "198.51.100.2"}],
+               "warnings": [], "coverage_note": "one page"}
+    def provider(name, target, scope, cancel, transport=None):
+        assert name == "dnsdumpster" and transport is not None
+        return ["www.example.org", "outside.invalid"], json.dumps(payload).encode()
+    monkeypatch.setattr('cyberrecon.engines.passive_domains', provider)
+    rows, outcomes = enumerate_hosts("dnsdumpster", "example.org",
+        Scope(["example.org", "*.example.org"]), threading.Event(), transport=object())
+    assert [row["host"] for row in rows] == ["www.example.org"]
+    assert outcomes[0]["record_count"] == 1
+    assert outcomes[0]["records"] == payload["records"]
+    assert outcomes[0]["coverage_note"] == "one page"
+
+
 class Resolver:
     def resolve(self, host, family, **kwargs):
         if family == 'MX':
@@ -325,7 +340,7 @@ def test_dashboard_streams_real_job_without_claiming_completion(tmp_path):
         assert 'provisional' in window.overview.notice.text()
         assert all(not b.isEnabled() for b in window.overview.export_buttons)
         assert window.result_views['backend'].table.rowCount() == 1
-        assert len(SECTIONS) == 18 and ('results', 'All Results') in SECTIONS
+        assert len(SECTIONS) == 19 and ('results', 'All Results') in SECTIONS
     finally:
         window.worker = None; window.close()
 
