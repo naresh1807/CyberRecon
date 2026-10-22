@@ -74,6 +74,14 @@ def test_tabs_and_sidebar_stay_synchronized(window, key):
     assert window.dashboard_tabs.currentIndex() == tab
 
 
+def test_gui_default_profile_enables_ct_and_explains_scope(window):
+    assert window.passive.currentText() == "ct"
+    assert "public certificate-transparency" in window.passive.toolTip()
+    assert "wildcard scope only when authorized" in window.passive.toolTip()
+    assert "wildcard only if authorized" in window.includes.placeholderText()
+    assert "public CT lookup" in window.description.text()
+
+
 def test_empty_and_narrow_layout(window):
     assert window.cards['target'].value.text() == 'No target'
     assert all(not button.isEnabled() for button in window.overview.export_buttons)
@@ -151,6 +159,7 @@ def test_loading_and_completed_backend_scan(window, monkeypatch):
     window.authority.setText('Own deterministic worker fixture')
     window.enable_ports.setChecked(False)
     window.crawl.setChecked(False)
+    window.passive.setCurrentIndex(0)  # Keep this worker test entirely offline.
     window.start_scan()
     assert window.worker is not None and not window.start.isEnabled()
     assert not window.overview.skeleton.isHidden()

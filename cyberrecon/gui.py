@@ -127,11 +127,13 @@ class Window(QMainWindow):
         advanced_layout = QVBoxLayout(self.advanced)
         form = QFormLayout()
         self.includes, self.excludes, self.authority = QLineEdit(), QLineEdit(), QLineEdit()
-        self.includes.setPlaceholderText("Blank = exact target only")
+        self.includes.setPlaceholderText("Blank = exact target only; wildcard only if authorized")
         self.excludes.setPlaceholderText("Comma-separated exclusions; override allowed scope")
         self.authority.setPlaceholderText("Ownership or written authorization reference")
         self.passive, self.history = QComboBox(), QComboBox()
         self.passive.addItems(["None", "ct", "ct,subfinder,assetfinder", "subfinder", "assetfinder", "amass"])
+        self.passive.setCurrentText("ct")
+        self.passive.setToolTip("Default: query public certificate-transparency services. Results are historical observations, not proof of current DNS. Child names outside Allowed scope are discarded; add wildcard scope only when authorized.")
         self.history.addItems(["None", "gau", "waybackurls"])
         self.lifecycle, self.go_dns = QCheckBox("Upstream lifecycle lookup"), QCheckBox("Go DNS worker")
         self.enable_ports = QCheckBox("Nmap TCP inventory for explicitly authorized IP targets")
@@ -150,7 +152,7 @@ class Window(QMainWindow):
         self.crawl = QCheckBox("Bounded crawl: 30 pages, depth 2")
         self.crawl.setChecked(True)
         for field_label, widget in (("Allowed scope", self.includes), ("Exclusions", self.excludes),
-                ("Authorization", self.authority), ("Passive discovery", self.passive),
+                ("Authorization", self.authority), ("Passive discovery (public CT lookup by default)", self.passive),
                 ("Historical URLs", self.history), ("Lifecycle", self.lifecycle), ("DNS worker", self.go_dns),
                 ("Ports", self.enable_ports), ("Nmap profile", self.nmap_profile), ("TCP port selection", self.port_list), ("Timing", self.nmap_timing), ("Nmap timeout (s)", self.nmap_timeout), ("Host timeout (s)", self.nmap_host_timeout), ("Probe rate", self.nmap_rate), ("OS hints", self.nmap_os), ("NSE", self.nmap_scripts), ("UDP", self.udp), ("DNS wordlist", self.dns_wordlist), ("Wildcard controls", self.check_wildcard),
                 ("CVE lookup", self.cve), ("Content wordlist", self.wordlist), ("Trusted lab CA", self.ca_bundle),
@@ -173,7 +175,10 @@ class Window(QMainWindow):
             "Bounded profile: exact authorized target; 30 hosts, 30 pages, depth 2, 100 HTTP requests, 2 requests/second.\n"
             "TLS verification and exclusions apply to every request. Discovered IPs/subdomains do not expand authorization.\n"
             "Nmap is IP-only. Full profile selects ports 1–65535; bounded timeouts can leave partial coverage. UDP/OS/NSE require opt-in; no privilege elevation.\n"
-            "External passive/lifecycle/NVD providers are opt-in. Host intelligence uses configured environment credentials; keys are never saved here.")
+            "GUI Start Recon defaults to scoped DNS, HTTP/TLS, technology checks, a bounded crawl and public CT lookup. "
+            "Subdomains outside Allowed scope are discarded; include a wildcard only when authorized.\n"
+            "External history, lifecycle/NVD, active DNS wordlists, OS/UDP/NSE remain opt-in. "
+            "Host intelligence uses configured environment credentials; keys are never saved here.")
         root = QWidget(); root.setObjectName("root")
         layout = QVBoxLayout(root); layout.setContentsMargins(16, 16, 16, 10); layout.setSpacing(10)
         header = QGridLayout(); header.setHorizontalSpacing(18)
@@ -192,7 +197,7 @@ class Window(QMainWindow):
         self.stop = QPushButton("Cancel"); self.stop.setEnabled(False); self.stop.clicked.connect(self.cancel_scan)
         target_layout.addWidget(self.stop)
         header.addWidget(self.target_row, 0, 1)
-        self.description = label("Discover scoped assets, inspect services and review evidence. Active requests require explicit authorization.", 'muted')
+        self.description = label("Start Recon runs bounded DNS, HTTP/TLS, technology checks, web discovery and a public CT lookup. Extra providers and active probes remain opt-in.", 'muted')
         self.description.setWordWrap(True); header.addWidget(self.description, 1, 1)
         header.setColumnStretch(1, 1); layout.addLayout(header)
         self.header_layout = header
