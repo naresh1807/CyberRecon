@@ -4,10 +4,10 @@ import time
 
 import httpx
 import pytest
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import QRect, Qt, QThreadPool
 from PySide6.QtWidgets import QApplication, QFileDialog, QDialog, QMessageBox
 from cyberrecon.dashboard import overview_data
-from cyberrecon.gui import Window, ObservationTable
+from cyberrecon.gui import Window, ObservationTable, _initial_window_geometry
 from cyberrecon.storage import Repository
 from cyberrecon.scanner import scan
 
@@ -88,7 +88,12 @@ def test_gui_default_profile_enables_ct_and_explains_scope(window, monkeypatch):
 def test_unverified_security_items_are_not_labeled_as_confirmed_vulnerabilities(window):
     findings_index = window.section_keys.index("findings")
     tab_index = window.tab_keys.index("findings")
-    assert window.navigation.item(findings_index).text() == "Potential Findings"
+    navigation_item = window.navigation.item(findings_index)
+    if window.width() < 900:
+        assert navigation_item.text() == ""
+        assert navigation_item.toolTip() == "Potential Findings"
+    else:
+        assert navigation_item.text() == "Potential Findings"
     assert window.dashboard_tabs.tabText(tab_index) == "Potential Findings"
     assert window.cards["findings"].title.text() == "Potential Findings"
 
@@ -109,6 +114,24 @@ def test_dnsdumpster_dashboard_view_renders_and_filters_provider_observations(wi
     assert view.table.rowCount() == 1
     view.filter.clear()
     assert view.table.rowCount() == 2
+
+
+def test_initial_window_geometry_fits_standard_laptop_screen():
+    # A 1536x1024 preference used to exceed this common 1366x768 display.
+    assert _initial_window_geometry(QRect(100, 40, 1366, 768), (1536, 1024)) == (132, 72, 1302, 704)
+
+
+def test_main_and_settings_windows_fit_usable_screen(window):
+    available = QApplication.primaryScreen().availableGeometry()
+    maximum_width = max(1, available.width() - 64)
+    maximum_height = max(1, available.height() - 64)
+    assert 1 <= window.width() <= maximum_width
+    assert 1 <= window.height() <= maximum_height
+    window.advanced.show()
+    QApplication.processEvents()
+    assert 1 <= window.advanced.width() <= maximum_width
+    assert 1 <= window.advanced.height() <= maximum_height
+    window.advanced.hide()
 
 
 def test_empty_and_narrow_layout(window):
@@ -175,7 +198,11 @@ def test_failed_worker_restores_controls_and_visible_error(window):
     assert window.start.isEnabled() and window.worker is None
     assert 'failed' in window.status.text().lower()
     assert not window.overview.notice.isHidden()
-    assert 'Failed' in window.application_state.text()
+    if window.width() < 900:
+        assert window.application_state.text() == '●'
+        assert window.application_state.toolTip() == 'Failed'
+    else:
+        assert 'Failed' in window.application_state.text()
 
 
 def test_loading_and_completed_backend_scan(window, monkeypatch):

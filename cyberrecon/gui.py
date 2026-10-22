@@ -60,6 +60,27 @@ QTabBar::tab:hover { background: #0a3658; }
 """
 
 
+def _initial_window_geometry(available, preferred, margin=32):
+    """Return a centered window rectangle that fits the usable screen area."""
+    width = max(1, min(preferred[0], available.width() - 2 * margin))
+    height = max(1, min(preferred[1], available.height() - 2 * margin))
+    x = available.x() + max(0, (available.width() - width) // 2)
+    y = available.y() + max(0, (available.height() - height) // 2)
+    return x, y, width, height
+
+
+def _fit_window_to_screen(widget, preferred, minimum, margin=32):
+    screen = QApplication.primaryScreen()
+    if screen is None:
+        widget.setMinimumSize(*minimum)
+        widget.resize(*preferred)
+        return
+    available = screen.availableGeometry()
+    x, y, width, height = _initial_window_geometry(available, preferred, margin)
+    widget.setMinimumSize(min(minimum[0], width), min(minimum[1], height))
+    widget.setGeometry(x, y, width, height)
+
+
 class Signals(QObject):
     done = Signal(str)
     error = Signal(str)
@@ -116,14 +137,12 @@ class Window(QMainWindow):
         self.setWindowTitle("CyberRecon — Authorized Reconnaissance")
         from pathlib import Path
         self.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/cyberrecon.svg')))
-        self.resize(1536, 1024)
-        self.setMinimumSize(560, 520)
+        _fit_window_to_screen(self, (1536, 1024), (560, 520))
         self.setStyleSheet(DASHBOARD_STYLE)
         self.local_jobs = []
         self._closing = False
         self.advanced = QDialog(self)
         self.advanced.setWindowTitle("Authorization and advanced settings")
-        self.advanced.resize(820, 720)
         advanced_layout = QVBoxLayout(self.advanced)
         form = QFormLayout()
         self.includes, self.excludes, self.authority = QLineEdit(), QLineEdit(), QLineEdit()
@@ -180,6 +199,7 @@ class Window(QMainWindow):
             "DNSDumpster is optional and needs DNSDUMPSTER_API_KEY in the environment; its records are provider observations, not current verification. "
             "External history, lifecycle/NVD, active DNS wordlists, OS/UDP/NSE remain opt-in. "
             "Host intelligence uses configured environment credentials; keys are never saved here.")
+        _fit_window_to_screen(self.advanced, (820, 720), (560, 420))
         root = QWidget(); root.setObjectName("root")
         layout = QVBoxLayout(root); layout.setContentsMargins(16, 16, 16, 10); layout.setSpacing(10)
         header = QGridLayout(); header.setHorizontalSpacing(18)
