@@ -10,12 +10,15 @@ def test_reports_escape_and_export(tmp_path):
     project = repo.create_project("<script>alert(1)</script>", ["example.org"], authority="Fixture")
     scan = repo.start_scan(project, "example.org", {})
     repo.save(scan, "findings", "=HYPERLINK(1)", {"note": "<img src=x onerror=alert(1)>"}, "fixture")
-    repo.finish(scan, [])
+    repo.finish(scan, ["bounded fixture warning"])
     destination = tmp_path / "reports"
     export_reports(repo, scan, destination)
     report = (destination / "report.html").read_text()
     assert "<script>" not in report
     assert "&lt;script&gt;" in report
+    assert "Scan status: PARTIAL" in report
+    assert "user-supplied and not independently verified" in report
+    assert "not confirmed vulnerabilities" in report
     assert "'=HYPERLINK" in (destination / "observations.csv").read_text()
     assert (destination / "report.pdf").read_bytes().startswith(b"%PDF")
     assert (destination / "graph.html").exists()

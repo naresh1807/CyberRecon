@@ -85,6 +85,14 @@ def test_gui_default_profile_enables_ct_and_explains_scope(window, monkeypatch):
     assert "ct,dnsdumpster" in [window.passive.itemText(i) for i in range(window.passive.count())]
 
 
+def test_unverified_security_items_are_not_labeled_as_confirmed_vulnerabilities(window):
+    findings_index = window.section_keys.index("findings")
+    tab_index = window.tab_keys.index("findings")
+    assert window.navigation.item(findings_index).text() == "Potential Findings"
+    assert window.dashboard_tabs.tabText(tab_index) == "Potential Findings"
+    assert window.cards["findings"].title.text() == "Potential Findings"
+
+
 def test_dnsdumpster_dashboard_view_renders_and_filters_provider_observations(window):
     view = window.result_views["dnsdumpster"]
     view.set_records([

@@ -82,13 +82,16 @@ def test_multiple_providers_normalized_and_independent(monkeypatch):
         if name == 'subfinder':
             raise ToolError('tool_missing', name)
         if name == 'ct':
-            return ['WWW.EXAMPLE.ORG.', 'www.example.org', 'outside.org'], json.dumps({'warnings': [], 'truncated': False}).encode()
-        return ['www.example.org', 'api.example.org'], b''
+            return ['WWW.EXAMPLE.ORG.', 'api.example.org', 'outside.org'], json.dumps({'warnings': [], 'truncated': False}).encode()
+        return ['www.example.org'], b''
     monkeypatch.setattr('cyberrecon.engines.passive_domains', provider)
     rows, outcomes = enumerate_hosts('ct,subfinder,assetfinder', 'example.org', Scope(['example.org', '*.example.org']), threading.Event())
     assert len(rows) == 2
     assert next(r for r in rows if r['host'] == 'www.example.org')['providers'] == ['assetfinder', 'ct']
+    assert next(r for r in rows if r['host'] == 'api.example.org')['providers'] == ['ct']
+    assert outcomes[0]['accepted_total'] == 2
     assert outcomes[1]['status'] == 'failed' and outcomes[1]['code'] == 'tool_missing'
+    assert outcomes[2]['accepted_total'] == 1
 
 
 def test_dnsdumpster_provider_records_survive_enumeration(monkeypatch):

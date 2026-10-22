@@ -223,13 +223,13 @@ class Window(QMainWindow):
         self.cards_layout = QGridLayout(); self.cards_layout.setSpacing(10); self.cards = {}
         for key, title, glyph, accent in (('target', 'Target', 'target', '#00b9f6'),
                 ('domains', 'Subdomains', 'domains', '#25d9ba'), ('ips', 'IP Addresses', 'ips', '#438fff'),
-                ('ports', 'Open Ports', 'ports', '#25d9ba'), ('findings', 'Vulnerabilities', 'findings', '#ff596d'),
+                ('ports', 'Open Ports', 'ports', '#25d9ba'), ('findings', 'Potential Findings', 'findings', '#ff596d'),
                 ('technologies', 'Technologies', 'technologies', '#718fff')):
             self.cards[key] = SummaryCard(title, glyph, accent)
         workspace_layout.addLayout(self.cards_layout)
         self.dashboard_tabs = QTabBar(); self.dashboard_tabs.setExpanding(False); self.dashboard_tabs.setUsesScrollButtons(True)
         self.tab_keys = ['overview', 'domains', 'ips', 'nmap', 'technologies', 'findings', 'dns', 'tls', 'web', 'screenshots', 'export', 'evidence', 'history', 'urls', 'apis', 'frontend', 'backend', 'results', 'dnsdumpster']
-        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Vulnerabilities', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend', 'All Results', 'DNSDumpster'):
+        for text in ('Overview', 'Subdomains', 'IPs', 'Nmap', 'Technologies', 'Potential Findings', 'DNS', 'SSL/TLS', 'HTTP Headers', 'Screenshots', 'Report', 'Coverage', 'History', 'URLs', 'APIs', 'Frontend', 'Backend', 'All Results', 'DNSDumpster'):
             self.dashboard_tabs.addTab(text)
         workspace_layout.addWidget(self.dashboard_tabs); workspace_layout.addWidget(self.pages, 1)
         body.addWidget(workspace, 1); layout.addLayout(body, 1)

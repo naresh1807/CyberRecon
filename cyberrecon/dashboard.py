@@ -9,7 +9,7 @@ from .network import clean_url
 
 SECTIONS = (
     ('overview', 'Overview'), ('domains', 'Subdomains'), ('dnsdumpster', 'DNSDumpster'), ('ips', 'IP Addresses'),
-    ('nmap', 'Nmap Scan'), ('technologies', 'Technologies'), ('findings', 'Vulnerabilities'),
+    ('nmap', 'Nmap Scan'), ('technologies', 'Technologies'), ('findings', 'Potential Findings'),
     ('dns', 'DNS'), ('tls', 'SSL/TLS'), ('web', 'HTTP Headers'),
     ('urls', 'Discovered URLs'), ('apis', 'API Inventory'), ('frontend', 'Frontend'), ('backend', 'Backend'),
     ('screenshots', 'Screenshots'), ('evidence', 'Progress & Coverage'),

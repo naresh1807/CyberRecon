@@ -33,9 +33,14 @@ def export_reports(repository, scan, directory):
                           json.dumps(result[field], ensure_ascii=False) if isinstance(result[field], (list, dict))
                           else str(result[field]) for field in fields]
                 writer.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
+    scan_status = html.escape(str(snapshot["scan"].get("status") or "unknown").upper())
+    report_notices = (
+        "<p><strong>Scan status: " + scan_status + "</strong>. Review stage coverage and warnings; partial or skipped stages make missing observations inconclusive.</p>"
+        "<p>The authorization reference is user-supplied and not independently verified. Findings are observations requiring validation, not confirmed vulnerabilities. Missing observations do not prove removal.</p>"
+    )
     sections = ["<!doctype html><html lang='en'><meta charset='utf-8'><title>CyberRecon report</title>",
                 "<style>body{font:16px system-ui;max-width:1000px;margin:40px auto;padding:20px}pre{white-space:pre-wrap;overflow-wrap:anywhere}h2{border-bottom:1px solid #aaa}</style>",
-                "<h1>CyberRecon report</h1><p>Observations require validation. Missing observations do not prove removal.</p>"]
+                "<h1>CyberRecon report</h1>" + report_notices]
     for kind in ("project", "scan", *KINDS, "results"):
         sections.append("<h2>" + html.escape(kind.title()) + "</h2><pre>" + html.escape(json.dumps(snapshot[kind], indent=2, ensure_ascii=False)) + "</pre>")
     sections.append("</html>")
@@ -45,7 +50,8 @@ def export_reports(repository, scan, directory):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     styles = getSampleStyleSheet()
     content = [Paragraph("CyberRecon report", styles["Title"]),
-               Paragraph("Observations require validation; missing observations do not prove removal.", styles["BodyText"])]
+               Paragraph("Scan status: <b>" + scan_status + "</b>. Review stage coverage and warnings; partial or skipped stages make missing observations inconclusive.", styles["BodyText"]),
+               Paragraph("The authorization reference is user-supplied and not independently verified. Findings are observations requiring validation, not confirmed vulnerabilities. Missing observations do not prove removal.", styles["BodyText"])]
     for kind in ("project", "scan", *KINDS, "results"):
         content.extend([Spacer(1, 12), Paragraph(kind.title(), styles["Heading2"])])
         items = snapshot[kind] if isinstance(snapshot[kind], list) else [snapshot[kind]]

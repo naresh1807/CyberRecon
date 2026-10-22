@@ -19,6 +19,7 @@ def enumerate_hosts(providers, root, scope, cancel, limit=5000, transport=None):
         if cancel.is_set():
             outcomes.append({"provider": provider, "status": "skipped", "reason": "cancelled"}); continue
         outcome = {"provider": provider, "started_at": utcnow(), "status": "complete", "warnings": []}
+        accepted = set()
         try:
             if provider == "dnsdumpster":
                 names, raw = engines.passive_domains(provider, root, scope, cancel, transport=transport)
@@ -48,7 +49,8 @@ def enumerate_hosts(providers, root, scope, cancel, limit=5000, transport=None):
                     outcome["status"] = "partial"
                     outcome["warnings"] = ["Provider result budget reached."]; break
                 hosts.setdefault(host, set()).add(provider)
-            outcome["accepted_total"] = len(hosts)
+                accepted.add(host)
+            outcome["accepted_total"] = len(accepted)
         except Exception as exc:
             if getattr(exc, "code", None) and type(exc).__name__ == "DNSDumpsterError":
                 code, message = exc.code, str(exc)
