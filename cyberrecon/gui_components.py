@@ -1,14 +1,111 @@
 """Native Qt dashboard widgets; no scanning or external requests here."""
 import json
 import math
+import time
 
-from PySide6.QtCore import Qt, QSize, QRectF
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPainterPath, QPalette
+from PySide6.QtCore import QObject, Qt, QSize, QRectF, QUrl
+from PySide6.QtGui import (QColor, QIcon, QPainter, QPen, QPixmap, QPainterPath, QPalette,
+    QDesktopServices, QKeySequence, QShortcut)
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QDialog, QTextEdit, QScrollArea, QHeaderView, QSizePolicy, QComboBox)
+    QDialog, QTextEdit, QScrollArea, QHeaderView, QSizePolicy, QComboBox, QApplication, QMenu)
 
 ACCENTS = {'success': '#27d697', 'danger': '#ff596d', 'warning': '#edb850', 'blue': '#399bff', 'cyan': '#29c9ee'}
+
+
+LINK_ROLE = Qt.UserRole + 1
+
+
+def browser_target(value):
+    """Convert a displayed domain or HTTP(S) URL to a safe browser target."""
+    from .network import clean_url
+    from .scope import host_of
+
+    text = str(value).strip()
+    if not text or len(text) > 4096:
+        return None
+    try:
+        if "://" in text:
+            return clean_url(text)
+        host = host_of(text)
+        authority = f"[{host}]" if ":" in host else host
+        return clean_url("https://" + authority + "/")
+    except (TypeError, ValueError):
+        return None
+
+
+def decorate_link_item(item, value):
+    target = browser_target(value)
+    if not target:
+        return None
+    item.setData(LINK_ROLE, target)
+    item.setForeground(QColor('#59baff'))
+    font = item.font()
+    font.setUnderline(True)
+    item.setFont(font)
+    item.setToolTip(item.toolTip() + "\n\nClick to open in your browser. Right-click or Ctrl+C to copy.")
+    return target
+
+
+class TableLinkActions(QObject):
+    """Add safe open/copy actions to table cells containing a URL or domain."""
+    def __init__(self, table):
+        super().__init__(table)
+        self.table = table
+        self._last_target = None
+        self._last_opened_at = 0.0
+        table.setMouseTracking(True)
+        table.viewport().setMouseTracking(True)
+        table.cellEntered.connect(self.hover_cell)
+        table.cellClicked.connect(self.open_cell)
+        table.setContextMenuPolicy(Qt.CustomContextMenu)
+        table.customContextMenuRequested.connect(self.show_context_menu)
+        self.copy_shortcut = QShortcut(QKeySequence("Ctrl+C"), table)
+        self.copy_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        self.copy_shortcut.activated.connect(self.copy_current_cell)
+
+    def hover_cell(self, row, column):
+        item = self.table.item(row, column)
+        cursor = Qt.PointingHandCursor if item and item.data(LINK_ROLE) else Qt.ArrowCursor
+        self.table.viewport().setCursor(cursor)
+
+    def open_target(self, target):
+        if target:
+            return QDesktopServices.openUrl(QUrl(target))
+        return False
+
+    def open_cell(self, row, column):
+        item = self.table.item(row, column)
+        target = item.data(LINK_ROLE) if item else None
+        if not target:
+            return
+        # A normal double-click emits two cellClicked signals; avoid opening two tabs.
+        now = time.monotonic()
+        if target == self._last_target and now - self._last_opened_at < 0.5:
+            return
+        self._last_target, self._last_opened_at = target, now
+        self.open_target(target)
+
+    def copy_item(self, item):
+        if item is not None:
+            QApplication.clipboard().setText(item.text())
+
+    def copy_current_cell(self):
+        self.copy_item(self.table.currentItem())
+
+    def show_context_menu(self, position):
+        item = self.table.itemAt(position)
+        if item is None:
+            return
+        self.table.setCurrentItem(item)
+        menu = QMenu(self.table)
+        copy_action = menu.addAction("Copy value")
+        target = item.data(LINK_ROLE)
+        open_action = menu.addAction("Open in browser")
+        open_action.setEnabled(bool(target))
+        copy_action.triggered.connect(lambda: self.copy_item(item))
+        open_action.triggered.connect(lambda: self.open_target(target))
+        menu.exec(self.table.mapToGlobal(position))
 
 
 def icon(name, color='#65b6ff', size=24):
@@ -108,6 +205,7 @@ class ObservationTable(QWidget):
         self.table.horizontalHeader().sectionClicked.connect(self.header_clicked)
         self.table.horizontalHeader().sortIndicatorChanged.connect(self.sort_records)
         self.table.cellDoubleClicked.connect(self.details)
+        self.link_actions = TableLinkActions(self.table)
         self.layout.addWidget(self.table, 1)
         footer = QHBoxLayout()
         self.summary = label('', 'tableSummary')
@@ -189,6 +287,7 @@ class ObservationTable(QWidget):
                 item = QTableWidgetItem(text[:500])
                 item.setData(Qt.UserRole, record.get('_record', record))
                 item.setToolTip(text[:10000])
+                decorate_link_item(item, text)
                 if key in ('state', 'status', 'severity'):
                     severity = text.casefold()
                     color = (ACCENTS['success'] if severity in ('open', 'active observed', 'present', 'low') else
@@ -224,7 +323,7 @@ class ObservationTable(QWidget):
 
     def details(self, row, column):
         item = self.table.item(row, column)
-        if item is None: return
+        if item is None or item.data(LINK_ROLE): return
         dialog = QDialog(self)
         dialog.setWindowTitle('Observation details — source and evidence')
         dialog.resize(760, 470)
@@ -299,7 +398,7 @@ class ResultsTable(ObservationTable):
 
     def details(self, row, column):
         item = self.table.item(row, column)
-        if item is None: return
+        if item is None or item.data(LINK_ROLE): return
         record = item.data(Qt.UserRole)
         dialog = QDialog(self); dialog.setWindowTitle("Result details and original evidence")
         dialog.resize(800, 520); layout = QVBoxLayout(dialog)
@@ -393,6 +492,7 @@ class OverviewDashboard(QScrollArea):
         self.information.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.information.horizontalHeader().hide(); self.information.verticalHeader().hide()
         self.information.setShowGrid(False); self.information.setAlternatingRowColors(True)
+        self.information_links = TableLinkActions(self.information)
         self.information.verticalHeader().setDefaultSectionSize(30)
         self.information.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.information.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -446,5 +546,7 @@ class OverviewDashboard(QScrollArea):
         for key, table in self.tables.items(): table.set_records(data[key], table.columns)
         for i, (key, value) in enumerate(data['information']):
             for column, text in enumerate((key, value)):
-                item = QTableWidgetItem(str(text)); item.setToolTip(str(text)); self.information.setItem(i, column, item)
+                item = QTableWidgetItem(str(text)); item.setToolTip(str(text))
+                decorate_link_item(item, text)
+                self.information.setItem(i, column, item)
         for button in self.export_buttons: button.setEnabled(snapshot is not None)

@@ -116,6 +116,54 @@ def test_dnsdumpster_dashboard_view_renders_and_filters_provider_observations(wi
     assert view.table.rowCount() == 2
 
 
+def test_domain_cells_open_in_browser_and_can_be_copied(window, monkeypatch):
+    table = window.result_views['domains']
+    table.set_records([{'subdomain': 'www.example.org'}], ['subdomain'])
+    item = table.table.item(0, 0)
+    assert item.data(Qt.UserRole + 1) == 'https://www.example.org/'
+    assert 'Right-click or Ctrl+C to copy' in item.toolTip()
+    assert item.font().underline()
+
+    opened = []
+    monkeypatch.setattr('cyberrecon.gui_components.QDesktopServices.openUrl',
+                        lambda url: opened.append(url.toString()) or True)
+    table.table.cellClicked.emit(0, 0)
+    assert opened == ['https://www.example.org/']
+    table.table.setCurrentItem(item)
+    table.link_actions.copy_current_cell()
+    assert QApplication.clipboard().text() == 'www.example.org'
+
+
+def test_overview_target_domain_is_clickable(window, monkeypatch):
+    fixture_scan(window)
+    item = window.overview.information.item(0, 1)
+    assert item.data(Qt.UserRole + 1) == 'https://127.0.0.1/'
+    opened = []
+    monkeypatch.setattr('cyberrecon.gui_components.QDesktopServices.openUrl',
+                        lambda url: opened.append(url.toString()) or True)
+    window.overview.information.cellClicked.emit(0, 1)
+    assert opened == ['https://127.0.0.1/']
+
+
+def test_url_links_redact_query_values_and_reject_unsafe_schemes(window, monkeypatch):
+    table = window.result_views['urls']
+    table.set_records([{'url': 'https://example.org/path?token=private'}], ['url'])
+    item = table.table.item(0, 0)
+    assert item.data(Qt.UserRole + 1) == 'https://example.org/path?token='
+
+    opened = []
+    monkeypatch.setattr('cyberrecon.gui_components.QDesktopServices.openUrl',
+                        lambda url: opened.append(url.toString()) or True)
+    table.table.cellClicked.emit(0, 0)
+    assert opened == ['https://example.org/path?token=']
+
+    table.set_records([{'url': 'javascript:alert(1)'}], ['url'])
+    unsafe = table.table.item(0, 0)
+    assert unsafe.data(Qt.UserRole + 1) is None
+    table.table.cellClicked.emit(0, 0)
+    assert opened == ['https://example.org/path?token=']
+
+
 def test_initial_window_geometry_fits_standard_laptop_screen():
     # A 1536x1024 preference used to exceed this common 1366x768 display.
     assert _initial_window_geometry(QRect(100, 40, 1366, 768), (1536, 1024)) == (132, 72, 1302, 704)
